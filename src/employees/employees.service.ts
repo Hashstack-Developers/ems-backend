@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { NoChangesException } from '../common/exceptions/no-changes.exception';
+import { isSameOptionalString } from '../common/utils/change-detection';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { Employee, EmployeeStatus } from './entities/employee.entity';
@@ -57,6 +59,22 @@ export class EmployeesService {
       if (existing) {
         throw new ConflictException('Email already exists');
       }
+    }
+
+    const hasChanges =
+      (dto.employeeCode !== undefined && dto.employeeCode !== employee.employeeCode) ||
+      (dto.firstName !== undefined && dto.firstName !== employee.firstName) ||
+      (dto.lastName !== undefined && dto.lastName !== employee.lastName) ||
+      (dto.email !== undefined && dto.email !== employee.email) ||
+      (dto.phone !== undefined && !isSameOptionalString(dto.phone, employee.phone)) ||
+      (dto.department !== undefined && dto.department !== employee.department) ||
+      (dto.designation !== undefined && dto.designation !== employee.designation) ||
+      (dto.basicSalary !== undefined && Number(dto.basicSalary) !== Number(employee.basicSalary)) ||
+      (dto.joinDate !== undefined && dto.joinDate !== employee.joinDate) ||
+      (dto.status !== undefined && dto.status !== employee.status);
+
+    if (!hasChanges) {
+      throw new NoChangesException();
     }
 
     Object.assign(employee, dto);

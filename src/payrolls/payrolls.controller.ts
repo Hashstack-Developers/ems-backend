@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  BadRequestException,
   Param,
   ParseIntPipe,
   Post,
@@ -10,25 +11,46 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RequirePermissions } from '../rbac/decorators/require-permissions.decorator';
+import { PermissionsGuard } from '../rbac/guards/permissions.guard';
 import { GeneratePayrollDto } from './dto/generate-payroll.dto';
 import { PayrollsService } from './payrolls.service';
 
 @Controller('payrolls')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class PayrollsController {
   constructor(private readonly payrollsService: PayrollsService) {}
 
   @Post('generate')
+  @RequirePermissions('payrolls.generate')
   async generate(@Body() dto: GeneratePayrollDto) {
     const data = await this.payrollsService.generate(dto);
     return {
       success: true,
-      message: `Generated ${data.length} payroll record(s)`,
+      message: this.payrollsService.buildGenerationMessage(data, !!dto.employeeId),
       data,
     };
   }
 
+  @Get('generation-status')
+  @RequirePermissions('payrolls.view')
+  async getGenerationStatus(
+    @Query('month') month: string,
+    @Query('year') year: string,
+  ) {
+    if (!month || !year) {
+      throw new BadRequestException('Month and year are required');
+    }
+
+    const data = await this.payrollsService.getGenerationStatus(
+      parseInt(month, 10),
+      parseInt(year, 10),
+    );
+    return { success: true, data };
+  }
+
   @Get('summary')
+  @RequirePermissions('payrolls.view')
   async getSummary(
     @Query('month') month?: string,
     @Query('year') year?: string,
@@ -41,6 +63,7 @@ export class PayrollsController {
   }
 
   @Get()
+  @RequirePermissions('payrolls.view')
   async findAll(
     @Query('month') month?: string,
     @Query('year') year?: string,
@@ -53,12 +76,14 @@ export class PayrollsController {
   }
 
   @Get(':id')
+  @RequirePermissions('payrolls.view')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     const data = await this.payrollsService.findOne(id);
     return { success: true, data };
   }
 
   @Delete(':id')
+  @RequirePermissions('payrolls.delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.payrollsService.remove(id);
     return { success: true, message: 'Payroll deleted successfully' };

@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { NoChangesException } from '../common/exceptions/no-changes.exception';
+import { isSameOptionalNumber, isSameOptionalString } from '../common/utils/change-detection';
 import { CreateSubTaxDto } from './dto/create-sub-tax.dto';
 import { CreateTaxSlabDto } from './dto/create-tax-slab.dto';
 import { UpdateSubTaxDto } from './dto/update-sub-tax.dto';
@@ -69,6 +71,19 @@ export class TaxSlabsService {
     const maxSalary =
       dto.maxSalary !== undefined ? dto.maxSalary : slab.maxSalary;
     this.validateSalaryRange(minSalary, maxSalary ?? null);
+
+    const hasChanges =
+      (dto.name !== undefined && dto.name !== slab.name) ||
+      (dto.minSalary !== undefined && Number(dto.minSalary) !== Number(slab.minSalary)) ||
+      (dto.maxSalary !== undefined && !isSameOptionalNumber(dto.maxSalary, slab.maxSalary ? Number(slab.maxSalary) : null)) ||
+      (dto.taxRate !== undefined && Number(dto.taxRate) !== Number(slab.taxRate)) ||
+      (dto.description !== undefined && !isSameOptionalString(dto.description, slab.description)) ||
+      (dto.isActive !== undefined && dto.isActive !== slab.isActive);
+
+    if (!hasChanges) {
+      throw new NoChangesException();
+    }
+
     Object.assign(slab, dto);
     await this.taxSlabsRepository.save(slab);
     return this.findOneTaxSlab(id);
@@ -150,6 +165,27 @@ export class TaxSlabsService {
 
     const merged = { ...subTax, ...dto, type: dto.type ?? subTax.type };
     this.validateSubTaxPayload(merged as CreateSubTaxDto);
+
+    const nextType = dto.type ?? subTax.type;
+    const nextRate = nextType === SubTaxType.PERCENTAGE
+      ? (dto.rate !== undefined ? dto.rate : subTax.rate)
+      : subTax.rate;
+    const nextAmount = nextType === SubTaxType.FIXED
+      ? (dto.amount !== undefined ? dto.amount : subTax.amount)
+      : subTax.amount;
+
+    const hasChanges =
+      (dto.name !== undefined && dto.name !== subTax.name) ||
+      (dto.code !== undefined && dto.code.toUpperCase() !== subTax.code) ||
+      (dto.type !== undefined && dto.type !== subTax.type) ||
+      (dto.rate !== undefined && Number(nextRate) !== Number(subTax.rate)) ||
+      (dto.amount !== undefined && Number(nextAmount) !== Number(subTax.amount)) ||
+      (dto.description !== undefined && !isSameOptionalString(dto.description, subTax.description)) ||
+      (dto.isActive !== undefined && dto.isActive !== subTax.isActive);
+
+    if (!hasChanges) {
+      throw new NoChangesException();
+    }
 
     Object.assign(subTax, dto);
     if (dto.code) {

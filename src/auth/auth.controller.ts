@@ -1,4 +1,9 @@
 import { Body, Controller, Get, Patch, Post, Request, UseGuards } from '@nestjs/common';
+import { RequirePermissions } from '../rbac/decorators/require-permissions.decorator';
+import { RequireSuperRole } from '../rbac/decorators/require-super-role.decorator';
+import { PermissionsGuard } from '../rbac/guards/permissions.guard';
+import { SuperRoleGuard } from '../rbac/guards/super-role.guard';
+import { AuthenticatedUser } from '../rbac/types/auth-user.type';
 import { AuthService } from './auth.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
@@ -12,10 +17,7 @@ export class AuthController {
   @UseGuards(LocalAuthGuard)
   @Post('login')
   async login(
-    @Request()
-    req: {
-      user: { id: number; email: string; role: string; fullName: string };
-    },
+    @Request() req: { user: AuthenticatedUser },
     @Body() _dto: LoginDto,
   ) {
     return {
@@ -24,16 +26,19 @@ export class AuthController {
     };
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions('settings.view')
   @Get('profile')
-  getProfile(@Request() req: { user: Record<string, unknown> }) {
+  getProfile(@Request() req: { user: AuthenticatedUser }) {
     return {
       success: true,
       data: req.user,
     };
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, SuperRoleGuard, PermissionsGuard)
+  @RequireSuperRole()
+  @RequirePermissions('settings.update')
   @Patch('change-password')
   async changePassword(
     @Request() req: { user: { id: number } },

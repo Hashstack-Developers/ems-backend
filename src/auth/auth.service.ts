@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 
@@ -15,6 +15,10 @@ export class AuthService {
       return null;
     }
 
+    if (!user.isActive) {
+      throw new UnauthorizedException('Account is deactivated');
+    }
+
     const isValid = await this.usersService.validatePassword(
       password,
       user.password,
@@ -23,12 +27,24 @@ export class AuthService {
       return null;
     }
 
-    const { password: _, ...result } = user;
-    return result;
+    return this.usersService.toPublicUser(user);
   }
 
-  async login(user: { id: number; email: string; role: string; fullName: string }) {
-    const payload = { sub: user.id, email: user.email, role: user.role };
+  async login(user: {
+    id: number;
+    email: string;
+    role: string;
+    fullName: string;
+    roleId: number;
+    permissions: string[];
+    isActive: boolean;
+  }) {
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    };
+
     return {
       accessToken: this.jwtService.sign(payload),
       user: {
@@ -36,6 +52,9 @@ export class AuthService {
         email: user.email,
         fullName: user.fullName,
         role: user.role,
+        roleId: user.roleId,
+        permissions: user.permissions,
+        isActive: user.isActive,
       },
     };
   }

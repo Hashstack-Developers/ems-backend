@@ -1,13 +1,12 @@
 import {
   BadRequestException,
-  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EmployeesService } from '../employees/employees.service';
-import { Employee } from '../employees/entities/employee.entity';
+import { Employee, EmployeeStatus } from '../employees/entities/employee.entity';
 import { TaxSlabsService } from '../tax-slabs/tax-slabs.service';
 import { GeneratePayrollDto } from './dto/generate-payroll.dto';
 import {
@@ -17,6 +16,45 @@ import {
 } from './entities/payroll-deduction.entity';
 import { SubTaxType } from '../tax-slabs/entities/sub-tax.entity';
 import { Payroll, PayrollStatus } from './entities/payroll.entity';
+
+export interface PayrollGenerationSkip {
+  employeeId: number;
+  employeeCode: string;
+  fullName: string;
+  reason: string;
+}
+
+export interface PayrollGenerationError {
+  employeeId: number;
+  employeeCode: string;
+  fullName: string;
+  message: string;
+}
+
+export interface PayrollGenerationResult {
+  created: Payroll[];
+  skipped: PayrollGenerationSkip[];
+  errors: PayrollGenerationError[];
+  summary: {
+    totalEligible: number;
+    createdCount: number;
+    skippedCount: number;
+    errorCount: number;
+  };
+}
+
+export interface PayrollGenerationStatus {
+  employeeId: number;
+  employeeCode: string;
+  fullName: string;
+  department: string;
+  designation: string;
+  hasPayroll: boolean;
+  payrollId: number | null;
+  payrollStatus: PayrollStatus | null;
+  canGenerate: boolean;
+  message: string;
+}
 
 @Injectable()
 export class PayrollsService {
@@ -29,7 +67,9 @@ export class PayrollsService {
     private readonly taxSlabsService: TaxSlabsService,
   ) {}
 
-  async generate(dto: GeneratePayrollDto): Promise<Payroll[]> {
+  async generate(dto: GeneratePayrollDto): Promise<PayrollGenerationResult> {
+    this.validatePeriod(dto.month, dto.year);
+
     const employees = dto.employeeId
       ? [await this.employeesService.findOne(dto.employeeId)]
       : await this.employeesService.findActiveEmployees();
@@ -38,14 +78,107 @@ export class PayrollsService {
       throw new BadRequestException('No active employees found for payroll generation');
     }
 
-    const results: Payroll[] = [];
-
-    for (const employee of employees) {
-      const payroll = await this.generateForEmployee(employee, dto.month, dto.year);
-      results.push(payroll);
+    if (dto.employeeId && employees[0].status !== EmployeeStatus.ACTIVE) {
+      throw new BadRequestException('Cannot generate payroll for an inactive employee');
     }
 
-    return results;
+    const result: PayrollGenerationResult = {
+      created: [],
+      skipped: [],
+      errors: [],
+      summary: {
+        totalEligible: employees.length,
+        createdCount: 0,
+        skippedCount: 0,
+        errorCount: 0,
+      },
+    };
+
+    for (const employee of employees) {
+      try {
+        const outcome = await this.tryGenerateForEmployee(
+          employee,
+          dto.month,
+          dto.year,
+        );
+
+        if (outcome.type === 'created') {
+          result.created.push(outcome.payroll);
+          continue;
+        }
+
+        result.skipped.push({
+          employeeId: employee.id,
+          employeeCode: employee.employeeCode,
+          fullName: `${employee.firstName} ${employee.lastName}`,
+          reason: outcome.reason,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Payroll generation failed';
+
+        result.errors.push({
+          employeeId: employee.id,
+          employeeCode: employee.employeeCode,
+          fullName: `${employee.firstName} ${employee.lastName}`,
+          message,
+        });
+
+        if (dto.employeeId) {
+          throw error;
+        }
+      }
+    }
+
+    result.summary = {
+      totalEligible: employees.length,
+      createdCount: result.created.length,
+      skippedCount: result.skipped.length,
+      errorCount: result.errors.length,
+    };
+
+    return result;
+  }
+
+  async getGenerationStatus(
+    month: number,
+    year: number,
+  ): Promise<PayrollGenerationStatus[]> {
+    this.validatePeriod(month, year);
+
+    const [employees, payrolls] = await Promise.all([
+      this.employeesService.findActiveEmployees(),
+      this.payrollsRepository.find({
+        where: { month, year },
+      }),
+    ]);
+
+    const payrollByEmployee = new Map(
+      payrolls.map((payroll) => [payroll.employeeId, payroll]),
+    );
+
+    return employees.map((employee) => {
+      const payroll = payrollByEmployee.get(employee.id);
+      const hasPayroll = !!payroll;
+
+      let message = 'Payroll not generated for this period';
+      if (hasPayroll) {
+        message = 'Payroll already exists for this period';
+      }
+
+      return {
+        employeeId: employee.id,
+        employeeCode: employee.employeeCode,
+        fullName: `${employee.firstName} ${employee.lastName}`,
+        department: employee.department,
+        designation: employee.designation,
+        hasPayroll,
+        payrollId: payroll?.id ?? null,
+        payrollStatus: payroll?.status ?? null,
+        canGenerate: !hasPayroll,
+        message,
+      };
+    });
   }
 
   async findAll(month?: number, year?: number): Promise<Payroll[]> {
@@ -144,20 +277,75 @@ export class PayrollsService {
     });
   }
 
-  private async generateForEmployee(
+  buildGenerationMessage(
+    result: PayrollGenerationResult,
+    singleEmployee: boolean,
+  ): string {
+    const { createdCount, skippedCount, errorCount } = result.summary;
+
+    if (singleEmployee) {
+      if (createdCount === 1) {
+        return 'Payroll generated successfully';
+      }
+      if (skippedCount === 1) {
+        return result.skipped[0]?.reason ?? 'Payroll already exists for this period';
+      }
+      if (errorCount === 1) {
+        return result.errors[0]?.message ?? 'Payroll generation failed';
+      }
+    }
+
+    if (createdCount === 0 && skippedCount > 0 && errorCount === 0) {
+      return `All ${skippedCount} employee(s) already have payroll for this period`;
+    }
+
+    if (createdCount > 0 && skippedCount > 0) {
+      return `Generated ${createdCount} payroll(s), skipped ${skippedCount} existing`;
+    }
+
+    if (createdCount > 0 && errorCount > 0) {
+      return `Generated ${createdCount} payroll(s), ${errorCount} failed`;
+    }
+
+    if (createdCount > 0) {
+      return `Generated ${createdCount} payroll record(s)`;
+    }
+
+    if (errorCount > 0) {
+      return `Payroll generation failed for ${errorCount} employee(s)`;
+    }
+
+    return 'No payroll records were generated';
+  }
+
+  private async tryGenerateForEmployee(
+    employee: Employee,
+    month: number,
+    year: number,
+  ): Promise<
+    | { type: 'created'; payroll: Payroll }
+    | { type: 'skipped'; reason: string }
+  > {
+    const existing = await this.payrollsRepository.findOne({
+      where: { employeeId: employee.id, month, year },
+    });
+
+    if (existing) {
+      return {
+        type: 'skipped',
+        reason: `Payroll already exists for ${employee.firstName} ${employee.lastName} for ${month}/${year}`,
+      };
+    }
+
+    const payroll = await this.createPayrollForEmployee(employee, month, year);
+    return { type: 'created', payroll };
+  }
+
+  private async createPayrollForEmployee(
     employee: Employee,
     month: number,
     year: number,
   ): Promise<Payroll> {
-    const existing = await this.payrollsRepository.findOne({
-      where: { employeeId: employee.id, month, year },
-    });
-    if (existing) {
-      throw new ConflictException(
-        `Payroll already exists for ${employee.firstName} ${employee.lastName} for ${month}/${year}`,
-      );
-    }
-
     const grossSalary = Number(employee.basicSalary);
     const taxResult = await this.taxSlabsService.calculateTaxes(grossSalary);
 
@@ -224,6 +412,15 @@ export class PayrollsService {
     }
 
     return this.findOne(savedPayroll.id);
+  }
+
+  private validatePeriod(month: number, year: number): void {
+    if (month < 1 || month > 12) {
+      throw new BadRequestException('Month must be between 1 and 12');
+    }
+    if (year < 2000 || year > 2100) {
+      throw new BadRequestException('Year must be between 2000 and 2100');
+    }
   }
 
   private round(value: number): number {

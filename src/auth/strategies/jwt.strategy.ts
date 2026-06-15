@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { UsersService } from '../../users/users.service';
+import { AuthenticatedUser } from '../../rbac/types/auth-user.type';
 
 export interface JwtPayload {
   sub: number;
@@ -23,10 +24,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: JwtPayload) {
+  async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
     const user = await this.usersService.findById(payload.sub);
     if (!user) {
       throw new UnauthorizedException('User no longer exists');
+    }
+
+    if (!user.isActive) {
+      throw new UnauthorizedException('Account is deactivated');
     }
 
     return {
@@ -34,6 +39,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       email: user.email,
       fullName: user.fullName,
       role: user.role,
+      roleId: user.roleId,
+      permissions: user.permissions,
+      isActive: user.isActive,
     };
   }
 }

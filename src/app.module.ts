@@ -14,6 +14,9 @@ import { ReportsModule } from './reports/reports.module';
 import { SubTax } from './tax-slabs/entities/sub-tax.entity';
 import { TaxSlab } from './tax-slabs/entities/tax-slab.entity';
 import { TaxSlabsModule } from './tax-slabs/tax-slabs.module';
+import { Permission } from './rbac/entities/permission.entity';
+import { Role } from './rbac/entities/role.entity';
+import { RbacModule } from './rbac/rbac.module';
 import { User } from './users/entities/user.entity';
 import { UsersModule } from './users/users.module';
 import { SeedModule } from './seed/seed.module';
@@ -30,11 +33,22 @@ import { SeedModule } from './seed/seed.module';
         username: configService.get<string>('DB_USERNAME', 'ems_user'),
         password: configService.get<string>('DB_PASSWORD', 'ems_password'),
         database: configService.get<string>('DB_DATABASE', 'employee_management'),
-        entities: [User, Employee, TaxSlab, SubTax, Payroll, PayrollDeduction, GpFundRecord],
+        entities: [
+          User,
+          Role,
+          Permission,
+          Employee,
+          TaxSlab,
+          SubTax,
+          Payroll,
+          PayrollDeduction,
+          GpFundRecord,
+        ],
         synchronize: true,
         logging: configService.get<string>('NODE_ENV') === 'development',
       }),
     }),
+    RbacModule,
     UsersModule,
     AuthModule,
     EmployeesModule,

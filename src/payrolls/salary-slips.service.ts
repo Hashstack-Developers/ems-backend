@@ -4,9 +4,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ZipArchive, type Archiver } from 'archiver';
 import PDFDocument from 'pdfkit';
 import { Repository } from 'typeorm';
 import { EmployeesService } from '../employees/employees.service';
+import { DownloadSalarySlipsZipDto } from './dto/download-salary-slips-zip.dto';
 import { GenerateSalarySlipDto } from './dto/generate-salary-slip.dto';
 import { Payroll, PayrollStatus } from './entities/payroll.entity';
 
@@ -167,6 +169,94 @@ export class SalarySlipsService {
       buffer,
       filename: `${slip.slipNumber}.pdf`,
     };
+  }
+
+  async resolveDownloadPayrolls(dto: DownloadSalarySlipsZipDto): Promise<Payroll[]> {
+    this.validatePeriod(dto.month, dto.year);
+
+    const payrolls = await this.payrollsRepository.find({
+      where: { month: dto.month, year: dto.year },
+      relations: { employee: true, deductions: true },
+      order: { employee: { firstName: 'ASC', lastName: 'ASC' } },
+    });
+
+    let eligible = payrolls.filter((payroll) => this.isPayrollEligible(payroll));
+
+    if (dto.department) {
+      eligible = eligible.filter(
+        (payroll) => payroll.employee.department === dto.department,
+      );
+    }
+
+    if (dto.payrollIds?.length) {
+      const requested = new Set(dto.payrollIds);
+      eligible = eligible.filter((payroll) => requested.has(payroll.id));
+
+      if (eligible.length === 0) {
+        throw new BadRequestException(
+          'No eligible salary slips found for the selected payroll record(s)',
+        );
+      }
+    }
+
+    if (eligible.length === 0) {
+      throw new BadRequestException(
+        'No salary slips available for download for the selected period',
+      );
+    }
+
+    return eligible;
+  }
+
+  buildZipFilename(month: number, year: number, selected: boolean): string {
+    const monthLabel = String(month).padStart(2, '0');
+    if (selected) {
+      return `salary-slips-selected-${year}-${monthLabel}.zip`;
+    }
+
+    const monthName = MONTH_NAMES[month - 1].toLowerCase();
+    return `salary-slips-${monthName}-${year}.zip`;
+  }
+
+  createZipArchive(): Archiver {
+    return new ZipArchive({ zlib: { level: 5 } });
+  }
+
+  async appendPayrollsToArchive(
+    archive: Archiver,
+    payrolls: Payroll[],
+  ): Promise<{ added: number; failures: string[] }> {
+    const usedNames = new Set<string>();
+    let added = 0;
+    const failures: string[] = [];
+
+    for (const payroll of payrolls) {
+      try {
+        if (!payroll.employee) {
+          throw new BadRequestException('Employee details are missing for payroll');
+        }
+
+        const slip = this.mapPayrollToSlip(payroll);
+        const buffer = await this.renderPdf(slip);
+        let filename = `${slip.slipNumber}.pdf`;
+        let counter = 1;
+
+        while (usedNames.has(filename)) {
+          filename = `${slip.slipNumber}-${counter}.pdf`;
+          counter += 1;
+        }
+
+        usedNames.add(filename);
+        archive.append(buffer, { name: filename });
+        added += 1;
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'PDF generation failed';
+        failures.push(`Payroll ${payroll.id}: ${message}`);
+      }
+    }
+
+    return { added, failures };
   }
 
   private mapPayrollToSlip(payroll: Payroll): SalarySlip {

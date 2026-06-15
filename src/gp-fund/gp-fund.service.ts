@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { NoChangesException } from '../common/exceptions/no-changes.exception';
+import { isSameOptionalNumber } from '../common/utils/change-detection';
 import { Payroll } from '../payrolls/entities/payroll.entity';
 import { CreateGpFundRecordDto } from './dto/create-gp-fund-record.dto';
 import { UpdateGpFundRecordDto } from './dto/update-gp-fund-record.dto';
@@ -57,6 +59,16 @@ export class GpFundService {
 
   async update(id: number, dto: UpdateGpFundRecordDto): Promise<GpFundRecord[]> {
     const record = await this.findOne(id);
+
+    const hasChanges =
+      (dto.year !== undefined && dto.year !== record.year) ||
+      (dto.yearlyTaxCollection !== undefined && Number(dto.yearlyTaxCollection) !== Number(record.yearlyTaxCollection)) ||
+      (dto.markupRate !== undefined && !isSameOptionalNumber(dto.markupRate, record.markupRate ? Number(record.markupRate) : null)) ||
+      (dto.markupTaxAmount !== undefined && Number(dto.markupTaxAmount) !== Number(record.markupTaxAmount ?? 0));
+
+    if (!hasChanges) {
+      throw new NoChangesException();
+    }
 
     if (dto.year !== undefined && dto.year !== record.year) {
       const conflict = await this.findByYear(dto.year);

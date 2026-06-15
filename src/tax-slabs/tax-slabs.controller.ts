@@ -10,6 +10,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RequirePermissions } from '../rbac/decorators/require-permissions.decorator';
+import { PermissionsGuard } from '../rbac/guards/permissions.guard';
 import { CreateSubTaxDto } from './dto/create-sub-tax.dto';
 import { CreateTaxSlabDto } from './dto/create-tax-slab.dto';
 import { UpdateSubTaxDto } from './dto/update-sub-tax.dto';
@@ -17,11 +19,12 @@ import { UpdateTaxSlabDto } from './dto/update-tax-slab.dto';
 import { TaxSlabsService } from './tax-slabs.service';
 
 @Controller('tax-slabs')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class TaxSlabsController {
   constructor(private readonly taxSlabsService: TaxSlabsService) {}
 
   @Post(':slabId/sub-taxes')
+  @RequirePermissions('taxes.create')
   async createSubTax(
     @Param('slabId', ParseIntPipe) slabId: number,
     @Body() dto: CreateSubTaxDto,
@@ -31,12 +34,14 @@ export class TaxSlabsController {
   }
 
   @Get(':slabId/sub-taxes')
+  @RequirePermissions('taxes.view')
   async findSubTaxesBySlab(@Param('slabId', ParseIntPipe) slabId: number) {
     const data = await this.taxSlabsService.findSubTaxesBySlab(slabId);
     return { success: true, data };
   }
 
   @Get(':slabId/sub-taxes/:id')
+  @RequirePermissions('taxes.view')
   async findOneSubTax(
     @Param('slabId', ParseIntPipe) slabId: number,
     @Param('id', ParseIntPipe) id: number,
@@ -46,6 +51,7 @@ export class TaxSlabsController {
   }
 
   @Patch(':slabId/sub-taxes/:id')
+  @RequirePermissions('taxes.update')
   async updateSubTax(
     @Param('slabId', ParseIntPipe) slabId: number,
     @Param('id', ParseIntPipe) id: number,
@@ -56,6 +62,7 @@ export class TaxSlabsController {
   }
 
   @Delete(':slabId/sub-taxes/:id')
+  @RequirePermissions('taxes.delete')
   async removeSubTax(
     @Param('slabId', ParseIntPipe) slabId: number,
     @Param('id', ParseIntPipe) id: number,
@@ -65,24 +72,28 @@ export class TaxSlabsController {
   }
 
   @Post()
+  @RequirePermissions('taxes.create')
   async createTaxSlab(@Body() dto: CreateTaxSlabDto) {
     const data = await this.taxSlabsService.createTaxSlab(dto);
     return { success: true, data };
   }
 
   @Get()
+  @RequirePermissions('taxes.view')
   async findAllTaxSlabs() {
     const data = await this.taxSlabsService.findAllTaxSlabs();
     return { success: true, data };
   }
 
   @Get(':id')
+  @RequirePermissions('taxes.view')
   async findOneTaxSlab(@Param('id', ParseIntPipe) id: number) {
     const data = await this.taxSlabsService.findOneTaxSlab(id);
     return { success: true, data };
   }
 
   @Patch(':id')
+  @RequirePermissions('taxes.update')
   async updateTaxSlab(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateTaxSlabDto,
@@ -92,6 +103,7 @@ export class TaxSlabsController {
   }
 
   @Delete(':id')
+  @RequirePermissions('taxes.delete')
   async removeTaxSlab(@Param('id', ParseIntPipe) id: number) {
     await this.taxSlabsService.removeTaxSlab(id);
     return { success: true, message: 'Tax slab deleted successfully' };
