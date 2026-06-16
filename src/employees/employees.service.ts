@@ -13,6 +13,7 @@ import { Employee, EmployeeStatus } from './entities/employee.entity';
 
 const NUMERIC_FIELDS = [
   'basicPayDec2025',
+  'basicPayJul2026',
   'personalAllowance',
   'hr',
   'ca',
@@ -21,6 +22,8 @@ const NUMERIC_FIELDS = [
   'adHocAllowance2023',
   'adHocAllowance2024',
   'adHocAllowance2025',
+  'adHocAllowance2026',
+  'personalPay',
   'overtimeAllowance',
   'integratedAllowance',
   'wa',
@@ -29,15 +32,24 @@ const NUMERIC_FIELDS = [
   'mphilSpecialAllowance',
   'socialSecurityBenefit',
   'grossSalary',
+  'loanAdvance',
   'deduction',
   'arrears',
+  'previousDeduction',
+  'totalDeductedIncomeTax202526',
+  'annualIncomeTax202526',
   'grossSalaryWithTaxes',
   'incomeTaxMay2026',
   'gpFund',
+  'previouslyCollectedGpFund',
+  'gpfCollection',
   'netPayable',
+  'increment',
 ] as const;
 
 const OPTIONAL_STRING_FIELDS = [
+  'srNo',
+  'fatherName',
   'basicPayScale',
   'religion',
   'salaryTill',
@@ -49,6 +61,7 @@ const OPTIONAL_STRING_FIELDS = [
   'mobile',
   'cnicNo',
   'stage',
+  'timePeriod',
   'accountNumber',
 ] as const;
 
@@ -62,11 +75,12 @@ export class EmployeesService {
   async create(dto: CreateEmployeeDto): Promise<Employee> {
     await this.ensureUniqueEmail(dto.email);
 
+    const normalized = this.normalizeDto(dto);
     const employeeCode = await this.generateEmployeeCode();
     const employee = this.employeesRepository.create({
-      ...dto,
+      ...normalized,
       employeeCode,
-      status: dto.status ?? EmployeeStatus.ACTIVE,
+      status: normalized.status ?? EmployeeStatus.ACTIVE,
     });
     return this.employeesRepository.save(employee);
   }
@@ -94,7 +108,8 @@ export class EmployeesService {
       throw new NoChangesException();
     }
 
-    Object.assign(employee, dto);
+    const normalized = this.normalizeDto(dto);
+    Object.assign(employee, normalized);
     return this.employeesRepository.save(employee);
   }
 
@@ -118,6 +133,23 @@ export class EmployeesService {
     return this.employeesRepository.count({
       where: { status: EmployeeStatus.ACTIVE },
     });
+  }
+
+  private normalizeDto<T extends CreateEmployeeDto | UpdateEmployeeDto>(dto: T): T {
+    const normalized = { ...dto } as T & { mobile?: string; cnicNo?: string };
+
+    if (normalized.mobile) {
+      normalized.mobile = normalized.mobile.replace(/[\s-]/g, '');
+    }
+
+    if (normalized.cnicNo) {
+      const digits = normalized.cnicNo.replace(/\D/g, '');
+      if (digits.length === 13) {
+        normalized.cnicNo = `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12)}`;
+      }
+    }
+
+    return normalized as T;
   }
 
   private async generateEmployeeCode(): Promise<string> {

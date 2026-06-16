@@ -35,8 +35,14 @@ export class Employee {
   @Column({ name: 'employee_code', unique: true })
   employeeCode: string;
 
+  @Column({ name: 'sr_no', type: 'varchar', length: 50, nullable: true })
+  srNo: string | null;
+
   @Column({ length: 200 })
   name: string;
+
+  @Column({ name: 'father_name', type: 'varchar', length: 200, nullable: true })
+  fatherName: string | null;
 
   @Column()
   designation: string;
@@ -88,8 +94,17 @@ export class Employee {
   @Column({ type: 'varchar', length: 100, nullable: true })
   stage: string | null;
 
+  @Column({ name: 'time_period', type: 'varchar', length: 100, nullable: true })
+  timePeriod: string | null;
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true, default: 0 })
+  increment: number | null;
+
   @Column(salaryColumn('basic_pay_dec_2025'))
   basicPayDec2025: number | null;
+
+  @Column(salaryColumn('basic_pay_jul_2026'))
+  basicPayJul2026: number | null;
 
   @Column(salaryColumn('personal_allowance'))
   personalAllowance: number | null;
@@ -115,6 +130,12 @@ export class Employee {
   @Column(salaryColumn('ad_hoc_allowance_2025'))
   adHocAllowance2025: number | null;
 
+  @Column(salaryColumn('ad_hoc_allowance_2026'))
+  adHocAllowance2026: number | null;
+
+  @Column(salaryColumn('personal_pay'))
+  personalPay: number | null;
+
   @Column(salaryColumn('overtime_allowance'))
   overtimeAllowance: number | null;
 
@@ -139,11 +160,23 @@ export class Employee {
   @Column(salaryColumn('gross_salary'))
   grossSalary: number | null;
 
+  @Column(salaryColumn('loan_advance'))
+  loanAdvance: number | null;
+
   @Column(salaryColumn('deduction'))
   deduction: number | null;
 
   @Column(salaryColumn('arrears'))
   arrears: number | null;
+
+  @Column(salaryColumn('previous_deduction'))
+  previousDeduction: number | null;
+
+  @Column(salaryColumn('total_deducted_income_tax_2025_26'))
+  totalDeductedIncomeTax202526: number | null;
+
+  @Column(salaryColumn('annual_income_tax_2025_26'))
+  annualIncomeTax202526: number | null;
 
   @Column(salaryColumn('gross_salary_with_taxes'))
   grossSalaryWithTaxes: number | null;
@@ -153,6 +186,12 @@ export class Employee {
 
   @Column(salaryColumn('gp_fund'))
   gpFund: number | null;
+
+  @Column(salaryColumn('previously_collected_gp_fund'))
+  previouslyCollectedGpFund: number | null;
+
+  @Column(salaryColumn('gpf_collection'))
+  gpfCollection: number | null;
 
   @Column(salaryColumn('net_payable'))
   netPayable: number | null;
