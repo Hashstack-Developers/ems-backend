@@ -28,8 +28,23 @@ export class TaxSlab {
   })
   maxSalary: number | null;
 
-  @Column({ name: 'tax_rate', type: 'decimal', precision: 5, scale: 2 })
-  taxRate: number;
+  @Column({
+    name: 'tax_rate',
+    type: 'decimal',
+    precision: 5,
+    scale: 2,
+    nullable: true,
+  })
+  taxRate: number | null;
+
+  @Column({
+    name: 'fixed_tax_amount',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  fixedTaxAmount: number | null;
 
   @Column({ type: 'text', nullable: true, default: null })
   description: string | null;

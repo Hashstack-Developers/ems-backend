@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EmployeesService } from '../employees/employees.service';
+import { getEmployeeFullName, getEmployeePayrollGross } from '../employees/employee.utils';
 import { Employee, EmployeeStatus } from '../employees/entities/employee.entity';
 import { TaxSlabsService } from '../tax-slabs/tax-slabs.service';
 import { GeneratePayrollDto } from './dto/generate-payroll.dto';
@@ -110,7 +111,7 @@ export class PayrollsService {
         result.skipped.push({
           employeeId: employee.id,
           employeeCode: employee.employeeCode,
-          fullName: `${employee.firstName} ${employee.lastName}`,
+          fullName: getEmployeeFullName(employee),
           reason: outcome.reason,
         });
       } catch (error) {
@@ -120,7 +121,7 @@ export class PayrollsService {
         result.errors.push({
           employeeId: employee.id,
           employeeCode: employee.employeeCode,
-          fullName: `${employee.firstName} ${employee.lastName}`,
+          fullName: getEmployeeFullName(employee),
           message,
         });
 
@@ -169,8 +170,8 @@ export class PayrollsService {
       return {
         employeeId: employee.id,
         employeeCode: employee.employeeCode,
-        fullName: `${employee.firstName} ${employee.lastName}`,
-        department: employee.department,
+        fullName: getEmployeeFullName(employee),
+        department: employee.stage ?? '',
         designation: employee.designation,
         hasPayroll,
         payrollId: payroll?.id ?? null,
@@ -333,7 +334,7 @@ export class PayrollsService {
     if (existing) {
       return {
         type: 'skipped',
-        reason: `Payroll already exists for ${employee.firstName} ${employee.lastName} for ${month}/${year}`,
+        reason: `Payroll already exists for ${getEmployeeFullName(employee)} for ${month}/${year}`,
       };
     }
 
@@ -346,7 +347,7 @@ export class PayrollsService {
     month: number,
     year: number,
   ): Promise<Payroll> {
-    const grossSalary = Number(employee.basicSalary);
+    const grossSalary = getEmployeePayrollGross(employee);
     const taxResult = await this.taxSlabsService.calculateTaxes(grossSalary);
 
     const payroll = this.payrollsRepository.create({
@@ -360,7 +361,7 @@ export class PayrollsService {
       netSalary: taxResult.netSalary,
       taxSlabId: taxResult.taxSlab?.id ?? null,
       taxSlabName: taxResult.taxSlab?.name ?? 'No applicable slab',
-      appliedTaxRate: taxResult.taxSlab
+      appliedTaxRate: taxResult.taxSlab?.taxRate != null
         ? Number(taxResult.taxSlab.taxRate)
         : null,
       taxSlabMinSalary: taxResult.taxSlab
@@ -377,17 +378,35 @@ export class PayrollsService {
     const deductions: Partial<PayrollDeduction>[] = [];
 
     if (taxResult.incomeTax > 0 && taxResult.taxSlab) {
-      deductions.push({
-        payrollId: savedPayroll.id,
-        name: 'Income Tax',
-        code: 'INCOME_TAX',
-        category: DeductionCategory.INCOME_TAX,
-        amount: taxResult.incomeTax,
-        calculationType: DeductionCalculationType.PERCENTAGE,
-        appliedRate: Number(taxResult.taxSlab.taxRate),
-        appliedFixedAmount: null,
-        sourceSubTaxId: null,
-      });
+      const { percentageMonthly, fixedMonthly } = taxResult.incomeTaxBreakdown;
+
+      if (percentageMonthly > 0) {
+        deductions.push({
+          payrollId: savedPayroll.id,
+          name: 'Income Tax (Percentage)',
+          code: 'INCOME_TAX',
+          category: DeductionCategory.INCOME_TAX,
+          amount: percentageMonthly,
+          calculationType: DeductionCalculationType.PERCENTAGE,
+          appliedRate: Number(taxResult.taxSlab.taxRate),
+          appliedFixedAmount: null,
+          sourceSubTaxId: null,
+        });
+      }
+
+      if (fixedMonthly > 0) {
+        deductions.push({
+          payrollId: savedPayroll.id,
+          name: 'Income Tax (Fixed)',
+          code: 'INCOME_TAX_FIXED',
+          category: DeductionCategory.INCOME_TAX,
+          amount: fixedMonthly,
+          calculationType: DeductionCalculationType.FIXED,
+          appliedRate: null,
+          appliedFixedAmount: Number(taxResult.taxSlab.fixedTaxAmount),
+          sourceSubTaxId: null,
+        });
+      }
     }
 
     for (const item of taxResult.subTaxDeductions) {

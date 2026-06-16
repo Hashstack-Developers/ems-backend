@@ -25,10 +25,16 @@ export class CreateTaxSlabDto {
   @IsPositive()
   maxSalary?: number;
 
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Max(100)
-  taxRate: number;
+  taxRate?: number | null;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  fixedTaxAmount?: number | null;
 
   @IsOptional()
   @IsString()

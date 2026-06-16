@@ -11,6 +11,47 @@ import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { Employee, EmployeeStatus } from './entities/employee.entity';
 
+const NUMERIC_FIELDS = [
+  'basicPayDec2025',
+  'personalAllowance',
+  'hr',
+  'ca',
+  'ma',
+  'adHocAllowance2022',
+  'adHocAllowance2023',
+  'adHocAllowance2024',
+  'adHocAllowance2025',
+  'overtimeAllowance',
+  'integratedAllowance',
+  'wa',
+  'specialAllowance',
+  'specialPay',
+  'mphilSpecialAllowance',
+  'socialSecurityBenefit',
+  'grossSalary',
+  'deduction',
+  'arrears',
+  'grossSalaryWithTaxes',
+  'incomeTaxMay2026',
+  'gpFund',
+  'netPayable',
+] as const;
+
+const OPTIONAL_STRING_FIELDS = [
+  'basicPayScale',
+  'religion',
+  'salaryTill',
+  'contractExpiryDate',
+  'dateOfRegularization',
+  'dateOfBirth',
+  'dateOfRetirement',
+  'lengthOfService',
+  'mobile',
+  'cnicNo',
+  'stage',
+  'accountNumber',
+] as const;
+
 @Injectable()
 export class EmployeesService {
   constructor(
@@ -19,10 +60,12 @@ export class EmployeesService {
   ) {}
 
   async create(dto: CreateEmployeeDto): Promise<Employee> {
-    await this.ensureUniqueFields(dto.employeeCode, dto.email);
+    await this.ensureUniqueEmail(dto.email);
 
+    const employeeCode = await this.generateEmployeeCode();
     const employee = this.employeesRepository.create({
       ...dto,
+      employeeCode,
       status: dto.status ?? EmployeeStatus.ACTIVE,
     });
     return this.employeesRepository.save(employee);
@@ -43,37 +86,11 @@ export class EmployeesService {
   async update(id: number, dto: UpdateEmployeeDto): Promise<Employee> {
     const employee = await this.findOne(id);
 
-    if (dto.employeeCode && dto.employeeCode !== employee.employeeCode) {
-      const existing = await this.employeesRepository.findOne({
-        where: { employeeCode: dto.employeeCode },
-      });
-      if (existing) {
-        throw new ConflictException('Employee code already exists');
-      }
-    }
-
     if (dto.email && dto.email !== employee.email) {
-      const existing = await this.employeesRepository.findOne({
-        where: { email: dto.email },
-      });
-      if (existing) {
-        throw new ConflictException('Email already exists');
-      }
+      await this.ensureUniqueEmail(dto.email, id);
     }
 
-    const hasChanges =
-      (dto.employeeCode !== undefined && dto.employeeCode !== employee.employeeCode) ||
-      (dto.firstName !== undefined && dto.firstName !== employee.firstName) ||
-      (dto.lastName !== undefined && dto.lastName !== employee.lastName) ||
-      (dto.email !== undefined && dto.email !== employee.email) ||
-      (dto.phone !== undefined && !isSameOptionalString(dto.phone, employee.phone)) ||
-      (dto.department !== undefined && dto.department !== employee.department) ||
-      (dto.designation !== undefined && dto.designation !== employee.designation) ||
-      (dto.basicSalary !== undefined && Number(dto.basicSalary) !== Number(employee.basicSalary)) ||
-      (dto.joinDate !== undefined && dto.joinDate !== employee.joinDate) ||
-      (dto.status !== undefined && dto.status !== employee.status);
-
-    if (!hasChanges) {
+    if (!this.hasChanges(employee, dto)) {
       throw new NoChangesException();
     }
 
@@ -89,7 +106,7 @@ export class EmployeesService {
   async findActiveEmployees(): Promise<Employee[]> {
     return this.employeesRepository.find({
       where: { status: EmployeeStatus.ACTIVE },
-      order: { firstName: 'ASC' },
+      order: { name: 'ASC' },
     });
   }
 
@@ -103,21 +120,48 @@ export class EmployeesService {
     });
   }
 
-  private async ensureUniqueFields(
-    employeeCode: string,
-    email: string,
-  ): Promise<void> {
-    const existingCode = await this.employeesRepository.findOne({
-      where: { employeeCode },
-    });
-    if (existingCode) {
-      throw new ConflictException('Employee code already exists');
+  private async generateEmployeeCode(): Promise<string> {
+    const result = await this.employeesRepository
+      .createQueryBuilder('e')
+      .select('MAX(e.id)', 'maxId')
+      .getRawOne<{ maxId: string | null }>();
+
+    const nextId = (result?.maxId ? parseInt(result.maxId, 10) : 0) + 1;
+    return `EMP-${String(nextId).padStart(4, '0')}`;
+  }
+
+  private hasChanges(employee: Employee, dto: UpdateEmployeeDto): boolean {
+    for (const [key, value] of Object.entries(dto)) {
+      if (value === undefined) continue;
+
+      const current = employee[key as keyof Employee];
+
+      if ((NUMERIC_FIELDS as readonly string[]).includes(key)) {
+        if (Number(value) !== Number(current ?? 0)) return true;
+        continue;
+      }
+
+      if ((OPTIONAL_STRING_FIELDS as readonly string[]).includes(key)) {
+        if (!isSameOptionalString(value as string, current as string | null)) {
+          return true;
+        }
+        continue;
+      }
+
+      if (value !== current) return true;
     }
 
-    const existingEmail = await this.employeesRepository.findOne({
+    return false;
+  }
+
+  private async ensureUniqueEmail(
+    email: string,
+    excludeId?: number,
+  ): Promise<void> {
+    const existing = await this.employeesRepository.findOne({
       where: { email },
     });
-    if (existingEmail) {
+    if (existing && existing.id !== excludeId) {
       throw new ConflictException('Email already exists');
     }
   }

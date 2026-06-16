@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { Parser } from 'json2csv';
 import PDFDocument from 'pdfkit';
 import { EmployeesService } from '../employees/employees.service';
+import { getEmployeeFullName } from '../employees/employee.utils';
 import { PayrollsService } from '../payrolls/payrolls.service';
 import { TaxSlabsService } from '../tax-slabs/tax-slabs.service';
 
@@ -64,14 +65,13 @@ export class ReportsService {
         const employees = await this.employeesService.findAll();
         data = employees.map((e) => ({
           employeeCode: e.employeeCode,
-          firstName: e.firstName,
-          lastName: e.lastName,
+          name: e.name,
           email: e.email,
-          phone: e.phone,
-          department: e.department,
+          mobile: e.mobile,
+          stage: e.stage,
           designation: e.designation,
-          basicSalary: Number(e.basicSalary),
-          joinDate: e.joinDate,
+          grossSalary: Number(e.grossSalary ?? 0),
+          dateOfJoining: e.dateOfJoining,
           status: e.status,
         }));
         filename = `employees-report-${timestamp}.csv`;
@@ -81,7 +81,7 @@ export class ReportsService {
         const payrolls = await this.payrollsService.findAll(month, year);
         data = payrolls.map((p) => ({
           employeeCode: p.employee?.employeeCode,
-          employeeName: `${p.employee?.firstName} ${p.employee?.lastName}`,
+          employeeName: p.employee ? getEmployeeFullName(p.employee) : '',
           month: p.month,
           year: p.year,
           grossSalary: Number(p.grossSalary),
@@ -121,7 +121,7 @@ export class ReportsService {
               code: '-',
               minSalary: Number(s.minSalary),
               maxSalary: s.maxSalary ? Number(s.maxSalary) : 'Unlimited',
-              rate: `${Number(s.taxRate)}%`,
+              rate: this.taxSlabsService.formatSlabTaxSummary(s),
               isActive: s.isActive,
             },
             ...(s.subTaxes ?? []).map((st) => ({
@@ -140,7 +140,7 @@ export class ReportsService {
           ]),
           ...payrolls.map((p) => ({
             category: 'Payroll Deduction',
-            name: `${p.employee?.firstName} ${p.employee?.lastName}`,
+            name: p.employee ? getEmployeeFullName(p.employee) : '',
             code: p.employee?.employeeCode,
             minSalary: Number(p.grossSalary),
             maxSalary: Number(p.incomeTax),
@@ -221,14 +221,14 @@ export class ReportsService {
       doc
         .fontSize(11)
         .text(
-          `${emp.employeeCode} - ${emp.firstName} ${emp.lastName}`,
+          `${emp.employeeCode} - ${emp.name}`,
           { continued: false },
         );
       doc
         .fontSize(9)
         .fillColor('#444')
         .text(
-          `Dept: ${emp.department} | Designation: ${emp.designation} | Salary: ${Number(emp.basicSalary).toLocaleString()} | Status: ${emp.status}`,
+          `Stage: ${emp.stage ?? '-'} | Designation: ${emp.designation} | Gross Salary: ${Number(emp.grossSalary ?? 0).toLocaleString()} | Status: ${emp.status}`,
         );
       doc.fillColor('#000').moveDown(0.5);
     }
@@ -252,7 +252,7 @@ export class ReportsService {
       doc
         .fontSize(11)
         .text(
-          `${p.employee?.employeeCode} - ${p.employee?.firstName} ${p.employee?.lastName} (${p.month}/${p.year})`,
+          `${p.employee?.employeeCode} - ${p.employee ? getEmployeeFullName(p.employee) : ''} (${p.month}/${p.year})`,
         );
       const slabRate =
         p.appliedTaxRate != null ? ` @ ${Number(p.appliedTaxRate)}%` : '';
@@ -299,7 +299,7 @@ export class ReportsService {
       doc
         .fontSize(10)
         .text(
-          `${slab.name}: ${Number(slab.minSalary).toLocaleString()} - ${max} @ ${Number(slab.taxRate)}% [${slab.isActive ? 'Active' : 'Inactive'}]`,
+          `${slab.name}: ${Number(slab.minSalary).toLocaleString()} - ${max} @ ${this.taxSlabsService.formatSlabTaxSummary(slab)} [${slab.isActive ? 'Active' : 'Inactive'}]`,
         );
 
       for (const sub of slab.subTaxes ?? []) {

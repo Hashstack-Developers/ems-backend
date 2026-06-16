@@ -15,9 +15,19 @@ import { UpdateTaxSlabDto } from './dto/update-tax-slab.dto';
 import { SubTax, SubTaxType } from './entities/sub-tax.entity';
 import { TaxSlab } from './entities/tax-slab.entity';
 
+const MONTHS_PER_TAX_YEAR = 12;
+
 export interface TaxCalculationResult {
   taxSlab: TaxSlab | null;
+  annualIncome: number;
+  annualIncomeTax: number;
   incomeTax: number;
+  incomeTaxBreakdown: {
+    percentageAnnual: number;
+    fixedAnnual: number;
+    percentageMonthly: number;
+    fixedMonthly: number;
+  };
   subTaxDeductions: Array<{
     subTax: SubTax;
     amount: number;
@@ -76,7 +86,16 @@ export class TaxSlabsService {
       (dto.name !== undefined && dto.name !== slab.name) ||
       (dto.minSalary !== undefined && Number(dto.minSalary) !== Number(slab.minSalary)) ||
       (dto.maxSalary !== undefined && !isSameOptionalNumber(dto.maxSalary, slab.maxSalary ? Number(slab.maxSalary) : null)) ||
-      (dto.taxRate !== undefined && Number(dto.taxRate) !== Number(slab.taxRate)) ||
+      (dto.taxRate !== undefined &&
+        !isSameOptionalNumber(
+          dto.taxRate,
+          slab.taxRate != null ? Number(slab.taxRate) : null,
+        )) ||
+      (dto.fixedTaxAmount !== undefined &&
+        !isSameOptionalNumber(
+          dto.fixedTaxAmount,
+          slab.fixedTaxAmount != null ? Number(slab.fixedTaxAmount) : null,
+        )) ||
       (dto.description !== undefined && !isSameOptionalString(dto.description, slab.description)) ||
       (dto.isActive !== undefined && dto.isActive !== slab.isActive);
 
@@ -217,18 +236,23 @@ export class TaxSlabsService {
     );
   }
 
-  async calculateTaxes(grossSalary: number): Promise<TaxCalculationResult> {
-    const taxSlab = await this.findApplicableTaxSlab(grossSalary);
-    const incomeTax = taxSlab
-      ? this.round((grossSalary * Number(taxSlab.taxRate)) / 100)
-      : 0;
+  async calculateTaxes(monthlyGrossSalary: number): Promise<TaxCalculationResult> {
+    const annualIncome = this.round(monthlyGrossSalary * MONTHS_PER_TAX_YEAR);
+    const taxSlab = await this.findApplicableTaxSlab(annualIncome);
+    const { percentage: percentageAnnual, fixed: fixedAnnual } = taxSlab
+      ? this.calculateAnnualIncomeTaxComponents(annualIncome, taxSlab)
+      : { percentage: 0, fixed: 0 };
+    const annualIncomeTax = this.round(percentageAnnual + fixedAnnual);
+    const percentageMonthly = this.round(percentageAnnual / MONTHS_PER_TAX_YEAR);
+    const fixedMonthly = this.round(fixedAnnual / MONTHS_PER_TAX_YEAR);
+    const incomeTax = this.round(percentageMonthly + fixedMonthly);
 
     const activeSubTaxes =
       taxSlab?.subTaxes?.filter((st) => st.isActive) ?? [];
 
     const subTaxDeductions = activeSubTaxes.map((subTax) => ({
       subTax,
-      amount: this.calculateSubTaxAmount(subTax, grossSalary),
+      amount: this.calculateSubTaxAmount(subTax, monthlyGrossSalary),
     }));
 
     const subTaxTotal = subTaxDeductions.reduce(
@@ -236,15 +260,58 @@ export class TaxSlabsService {
       0,
     );
     const totalDeductions = this.round(incomeTax + subTaxTotal);
-    const netSalary = this.round(grossSalary - totalDeductions);
+    const netSalary = this.round(monthlyGrossSalary - totalDeductions);
 
     return {
       taxSlab,
+      annualIncome,
+      annualIncomeTax,
       incomeTax,
+      incomeTaxBreakdown: {
+        percentageAnnual,
+        fixedAnnual,
+        percentageMonthly,
+        fixedMonthly,
+      },
       subTaxDeductions,
       totalDeductions,
       netSalary,
     };
+  }
+
+  private calculateAnnualIncomeTaxComponents(
+    annualIncome: number,
+    taxSlab: TaxSlab,
+  ): { percentage: number; fixed: number } {
+    let percentage = 0;
+    let fixed = 0;
+
+    if (taxSlab.taxRate != null && Number(taxSlab.taxRate) > 0) {
+      const minSalary = Number(taxSlab.minSalary);
+      const exemptionThreshold = minSalary > 0 ? minSalary - 1 : 0;
+      const taxableExcess = Math.max(0, annualIncome - exemptionThreshold);
+      percentage = this.round((taxableExcess * Number(taxSlab.taxRate)) / 100);
+    }
+
+    if (taxSlab.fixedTaxAmount != null && Number(taxSlab.fixedTaxAmount) > 0) {
+      fixed = this.round(Number(taxSlab.fixedTaxAmount));
+    }
+
+    return { percentage, fixed };
+  }
+
+  formatSlabTaxSummary(slab: TaxSlab): string {
+    const parts: string[] = [];
+    if (slab.taxRate != null && Number(slab.taxRate) > 0) {
+      const threshold = Math.max(0, Number(slab.minSalary) - 1);
+      parts.push(
+        `${Number(slab.taxRate)}% on amount exceeding ${threshold.toLocaleString()}`,
+      );
+    }
+    if (slab.fixedTaxAmount != null && Number(slab.fixedTaxAmount) > 0) {
+      parts.push(`Fixed ${Number(slab.fixedTaxAmount).toLocaleString()} / year`);
+    }
+    return parts.length > 0 ? parts.join(' + ') : 'No tax';
   }
 
   async migrateOrphanSubTaxes(): Promise<void> {

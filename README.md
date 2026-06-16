@@ -31,5 +31,5 @@ All DTOs use `class-validator`. The global `ValidationPipe` strips unknown field
 ## Seeding
 
 On module init:
-- `UsersSeedService` creates the default admin if none exists
-- `TaxSlabsSeedService` creates default tax slabs and EOBI/SS/PT sub-taxes
+- `RbacSeedService` creates roles and permissions
+- `UsersSeedService` creates admin users from `.env` if passwords are configured

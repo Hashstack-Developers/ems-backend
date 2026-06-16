@@ -8,6 +8,7 @@ import { ZipArchive, type Archiver } from 'archiver';
 import PDFDocument from 'pdfkit';
 import { Repository } from 'typeorm';
 import { EmployeesService } from '../employees/employees.service';
+import { getEmployeeFullName } from '../employees/employee.utils';
 import { DownloadSalarySlipsZipDto } from './dto/download-salary-slips-zip.dto';
 import { GenerateSalarySlipDto } from './dto/generate-salary-slip.dto';
 import { Payroll, PayrollStatus } from './entities/payroll.entity';
@@ -29,13 +30,11 @@ export interface SalarySlip {
   employee: {
     id: number;
     employeeCode: string;
-    firstName: string;
-    lastName: string;
     fullName: string;
-    department: string;
+    stage: string;
     designation: string;
     email: string;
-    joinDate: string;
+    dateOfJoining: string;
   };
   earnings: {
     basicSalary: number;
@@ -58,7 +57,7 @@ export interface SalarySlipAvailability {
   employeeId: number;
   employeeCode: string;
   fullName: string;
-  department: string;
+  stage: string;
   designation: string;
   payrollId: number | null;
   payrollStatus: PayrollStatus | null;
@@ -108,8 +107,8 @@ export class SalarySlipsService {
       return {
         employeeId: emp.id,
         employeeCode: emp.employeeCode,
-        fullName: `${emp.firstName} ${emp.lastName}`,
-        department: emp.department,
+        fullName: getEmployeeFullName(emp),
+        stage: emp.stage ?? '',
         designation: emp.designation,
         payrollId: payroll?.id ?? null,
         payrollStatus: payroll?.status ?? null,
@@ -177,14 +176,14 @@ export class SalarySlipsService {
     const payrolls = await this.payrollsRepository.find({
       where: { month: dto.month, year: dto.year },
       relations: { employee: true, deductions: true },
-      order: { employee: { firstName: 'ASC', lastName: 'ASC' } },
+      order: { employee: { name: 'ASC' } },
     });
 
     let eligible = payrolls.filter((payroll) => this.isPayrollEligible(payroll));
 
     if (dto.department) {
       eligible = eligible.filter(
-        (payroll) => payroll.employee.department === dto.department,
+        (payroll) => payroll.employee.stage === dto.department,
       );
     }
 
@@ -274,13 +273,11 @@ export class SalarySlipsService {
       employee: {
         id: emp.id,
         employeeCode: emp.employeeCode,
-        firstName: emp.firstName,
-        lastName: emp.lastName,
-        fullName: `${emp.firstName} ${emp.lastName}`,
-        department: emp.department,
+        fullName: getEmployeeFullName(emp),
+        stage: emp.stage ?? '',
         designation: emp.designation,
         email: emp.email,
-        joinDate: emp.joinDate,
+        dateOfJoining: emp.dateOfJoining,
       },
       earnings: {
         basicSalary: Number(payroll.basicSalary),
@@ -349,7 +346,7 @@ export class SalarySlipsService {
         doc.fontSize(10).fillColor('#444');
         doc.text(`Name: ${slip.employee.fullName}`);
         doc.text(`Code: ${slip.employee.employeeCode}`);
-        doc.text(`Department: ${slip.employee.department} | Designation: ${slip.employee.designation}`);
+        doc.text(`Stage: ${slip.employee.stage} | Designation: ${slip.employee.designation}`);
         doc.moveDown(1);
         doc.fillColor('#000');
 
