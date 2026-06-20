@@ -5,6 +5,7 @@ import { AuthModule } from './auth/auth.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { GpFundModule } from './gp-fund/gp-fund.module';
 import { GpFundRecord } from './gp-fund/entities/gp-fund-record.entity';
+import { GpFundScale } from './gp-fund/entities/gp-fund-scale.entity';
 import { Employee } from './employees/entities/employee.entity';
 import { EmployeesModule } from './employees/employees.module';
 import { PayrollDeduction } from './payrolls/entities/payroll-deduction.entity';
@@ -44,6 +45,7 @@ import { UsersModule } from './users/users.module';
           Payroll,
           PayrollDeduction,
           GpFundRecord,
+          GpFundScale,
         ],
         synchronize: true,
         logging: configService.get<string>('NODE_ENV') === 'development',

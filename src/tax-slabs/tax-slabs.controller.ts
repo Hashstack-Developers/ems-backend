@@ -8,20 +8,26 @@ import {
   Patch,
   Post,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RequirePermissions } from '../rbac/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../rbac/guards/permissions.guard';
 import { CreateSubTaxDto } from './dto/create-sub-tax.dto';
 import { CreateTaxSlabDto } from './dto/create-tax-slab.dto';
+import { TaxOverviewQueryDto } from './dto/tax-overview-query.dto';
 import { UpdateSubTaxDto } from './dto/update-sub-tax.dto';
 import { UpdateTaxSlabDto } from './dto/update-tax-slab.dto';
+import { TaxOverviewService } from './tax-overview.service';
 import { TaxSlabsService } from './tax-slabs.service';
 
 @Controller('tax-slabs')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class TaxSlabsController {
-  constructor(private readonly taxSlabsService: TaxSlabsService) {}
+  constructor(
+    private readonly taxSlabsService: TaxSlabsService,
+    private readonly taxOverviewService: TaxOverviewService,
+  ) {}
 
   @Post(':slabId/sub-taxes')
   @RequirePermissions('taxes.create')
@@ -75,6 +81,13 @@ export class TaxSlabsController {
   @RequirePermissions('taxes.create')
   async createTaxSlab(@Body() dto: CreateTaxSlabDto) {
     const data = await this.taxSlabsService.createTaxSlab(dto);
+    return { success: true, data };
+  }
+
+  @Get('overview')
+  @RequirePermissions('taxes.view')
+  async getOverview(@Query() query: TaxOverviewQueryDto) {
+    const data = await this.taxOverviewService.getOverview(query);
     return { success: true, data };
   }
 

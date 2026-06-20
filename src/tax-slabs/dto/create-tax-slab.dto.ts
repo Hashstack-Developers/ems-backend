@@ -8,7 +8,15 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
+
+function normalizeOptionalMaxSalary(value: unknown): number | null | undefined {
+  if (value === '' || value === null || value === undefined) return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
 
 export class CreateTaxSlabDto {
   @IsString()
@@ -21,9 +29,11 @@ export class CreateTaxSlabDto {
   minSalary: number;
 
   @IsOptional()
+  @Transform(({ value }) => normalizeOptionalMaxSalary(value))
+  @ValidateIf((o) => o.maxSalary !== null)
   @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
-  maxSalary?: number;
+  maxSalary?: number | null;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })

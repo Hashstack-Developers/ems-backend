@@ -8,16 +8,27 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { NoChangesException } from '../common/exceptions/no-changes.exception';
 import { isSameOptionalNumber } from '../common/utils/change-detection';
+import { Employee } from '../employees/entities/employee.entity';
 import { Payroll } from '../payrolls/entities/payroll.entity';
+import { CreateGpFundScaleDto } from './dto/create-gp-fund-scale.dto';
 import { CreateGpFundRecordDto } from './dto/create-gp-fund-record.dto';
+import { UpdateGpFundScaleDto } from './dto/update-gp-fund-scale.dto';
 import { UpdateGpFundRecordDto } from './dto/update-gp-fund-record.dto';
 import { GpFundRecord } from './entities/gp-fund-record.entity';
+import { GpFundScale } from './entities/gp-fund-scale.entity';
+import { resolveGpFundAmount } from './gp-fund.utils';
+
+const GP_SCALE_CODES = Array.from({ length: 22 }, (_, index) => `B-${index + 1}`);
 
 @Injectable()
 export class GpFundService {
   constructor(
     @InjectRepository(GpFundRecord)
     private readonly gpFundRepository: Repository<GpFundRecord>,
+    @InjectRepository(GpFundScale)
+    private readonly gpFundScaleRepository: Repository<GpFundScale>,
+    @InjectRepository(Employee)
+    private readonly employeeRepository: Repository<Employee>,
     @InjectRepository(Payroll)
     private readonly payrollsRepository: Repository<Payroll>,
   ) {}
@@ -36,6 +47,73 @@ export class GpFundService {
 
   async findByYear(year: number): Promise<GpFundRecord | null> {
     return this.gpFundRepository.findOne({ where: { year } });
+  }
+
+  async findAllScales(): Promise<GpFundScale[]> {
+    await this.ensureDefaultScales();
+    return this.gpFundScaleRepository.find({ order: { code: 'ASC' } });
+  }
+
+  async getScaleValueMap(): Promise<Map<string, number>> {
+    await this.ensureDefaultScales();
+    const scales = await this.gpFundScaleRepository.find();
+    const map = new Map<string, number>();
+    for (const scale of scales) {
+      map.set(scale.code.toUpperCase(), Number(scale.value));
+    }
+    return map;
+  }
+
+  resolveGpFundAmountForEmployee(
+    employee: Employee,
+    scaleMap: Map<string, number>,
+  ) {
+    return resolveGpFundAmount(employee, scaleMap);
+  }
+
+  async createScale(dto: CreateGpFundScaleDto): Promise<GpFundScale> {
+    const code = dto.code.trim().toUpperCase();
+    const existing = await this.gpFundScaleRepository.findOne({ where: { code } });
+    if (existing) {
+      throw new ConflictException(`GP Fund scale ${code} already exists`);
+    }
+    const scale = this.gpFundScaleRepository.create({
+      code,
+      value: dto.value ?? 0,
+    });
+    return this.gpFundScaleRepository.save(scale);
+  }
+
+  async updateScale(id: number, dto: UpdateGpFundScaleDto): Promise<GpFundScale> {
+    await this.ensureDefaultScales();
+    const scale = await this.gpFundScaleRepository.findOne({ where: { id } });
+    if (!scale) {
+      throw new NotFoundException(`GP Fund scale with ID ${id} not found`);
+    }
+    if (Number(scale.value) === Number(dto.value)) {
+      throw new NoChangesException();
+    }
+    scale.value = dto.value;
+    return this.gpFundScaleRepository.save(scale);
+  }
+
+  async removeScale(id: number): Promise<{ message: string }> {
+    const scale = await this.gpFundScaleRepository.findOne({ where: { id } });
+    if (!scale) {
+      throw new NotFoundException(`GP Fund scale with ID ${id} not found`);
+    }
+
+    const usageCount = await this.employeeRepository.count({
+      where: { gpFund: scale.code },
+    });
+    if (usageCount > 0) {
+      throw new BadRequestException(
+        `GP Fund scale ${scale.code} is assigned to ${usageCount} employee(s) and cannot be deleted`,
+      );
+    }
+
+    await this.gpFundScaleRepository.remove(scale);
+    return { message: `GP Fund scale ${scale.code} deleted successfully` };
   }
 
   async create(dto: CreateGpFundRecordDto): Promise<GpFundRecord[]> {
@@ -148,5 +226,22 @@ export class GpFundService {
 
   private round(value: number): number {
     return Math.round(value * 100) / 100;
+  }
+
+  private async ensureDefaultScales(): Promise<void> {
+    const existing = await this.gpFundScaleRepository.find();
+    const existingCodes = new Set(existing.map((scale) => scale.code));
+    const missing = GP_SCALE_CODES.filter((code) => !existingCodes.has(code));
+
+    if (missing.length === 0) return;
+
+    await this.gpFundScaleRepository.save(
+      missing.map((code) =>
+        this.gpFundScaleRepository.create({
+          code,
+          value: 0,
+        }),
+      ),
+    );
   }
 }

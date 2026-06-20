@@ -48,9 +48,13 @@ export class TaxSlabsService {
   // --- Tax Slab CRUD ---
 
   async createTaxSlab(dto: CreateTaxSlabDto): Promise<TaxSlab> {
-    this.validateSalaryRange(dto.minSalary, dto.maxSalary ?? null);
+    const maxSalary = dto.maxSalary ?? null;
+    this.validateSalaryRange(dto.minSalary, maxSalary);
     const slab = this.taxSlabsRepository.create({
       ...dto,
+      maxSalary,
+      taxRate: dto.taxRate ?? null,
+      fixedTaxAmount: dto.fixedTaxAmount ?? null,
       isActive: dto.isActive ?? true,
     });
     const saved = await this.taxSlabsRepository.save(slab);
@@ -79,13 +83,13 @@ export class TaxSlabsService {
     const slab = await this.findOneTaxSlab(id);
     const minSalary = dto.minSalary ?? Number(slab.minSalary);
     const maxSalary =
-      dto.maxSalary !== undefined ? dto.maxSalary : slab.maxSalary;
-    this.validateSalaryRange(minSalary, maxSalary ?? null);
+      dto.maxSalary !== undefined ? (dto.maxSalary ?? null) : (slab.maxSalary != null ? Number(slab.maxSalary) : null);
+    this.validateSalaryRange(minSalary, maxSalary);
 
     const hasChanges =
       (dto.name !== undefined && dto.name !== slab.name) ||
       (dto.minSalary !== undefined && Number(dto.minSalary) !== Number(slab.minSalary)) ||
-      (dto.maxSalary !== undefined && !isSameOptionalNumber(dto.maxSalary, slab.maxSalary ? Number(slab.maxSalary) : null)) ||
+      (dto.maxSalary !== undefined && !isSameOptionalNumber(dto.maxSalary ?? null, slab.maxSalary != null ? Number(slab.maxSalary) : null)) ||
       (dto.taxRate !== undefined &&
         !isSameOptionalNumber(
           dto.taxRate,
@@ -104,6 +108,9 @@ export class TaxSlabsService {
     }
 
     Object.assign(slab, dto);
+    if (dto.maxSalary !== undefined) {
+      slab.maxSalary = dto.maxSalary ?? null;
+    }
     await this.taxSlabsRepository.save(slab);
     return this.findOneTaxSlab(id);
   }

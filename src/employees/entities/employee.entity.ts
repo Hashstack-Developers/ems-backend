@@ -18,6 +18,11 @@ export enum EmploymentType {
   REGULAR = 'regular',
 }
 
+export enum DisabilityStatus {
+  NO = 'no',
+  YES = 'yes',
+}
+
 const salaryColumn = (name: string) => ({
   name,
   type: 'decimal' as const,
@@ -44,6 +49,9 @@ export class Employee {
   @Column({ name: 'father_name', type: 'varchar', length: 200, nullable: true })
   fatherName: string | null;
 
+  @Column({ type: 'text', nullable: true })
+  address: string | null;
+
   @Column()
   designation: string;
 
@@ -52,6 +60,13 @@ export class Employee {
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   religion: string | null;
+
+  @Column({
+    type: 'enum',
+    enum: DisabilityStatus,
+    nullable: true,
+  })
+  disability: DisabilityStatus | null;
 
   @Column({ name: 'salary_till', type: 'date', nullable: true })
   salaryTill: string | null;
@@ -94,7 +109,7 @@ export class Employee {
   @Column({ type: 'varchar', length: 100, nullable: true })
   stage: string | null;
 
-  @Column({ name: 'time_period', type: 'varchar', length: 100, nullable: true })
+  @Column({ name: 'time_period', type: 'varchar', length: 10, nullable: true })
   timePeriod: string | null;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true, default: 0 })
@@ -184,8 +199,8 @@ export class Employee {
   @Column(salaryColumn('income_tax_may_2026'))
   incomeTaxMay2026: number | null;
 
-  @Column(salaryColumn('gp_fund'))
-  gpFund: number | null;
+  @Column({ name: 'gp_fund', type: 'varchar', length: 10, nullable: true })
+  gpFund: string | null;
 
   @Column(salaryColumn('previously_collected_gp_fund'))
   previouslyCollectedGpFund: number | null;

@@ -4,15 +4,23 @@ REST API for the Employee Management System.
 
 ## Modules
 
-| Module       | Path prefix    | Responsibility                          |
-|--------------|----------------|-----------------------------------------|
-| AuthModule   | `/auth`        | JWT login, profile                      |
-| EmployeesModule | `/employees` | Employee CRUD                        |
-| TaxSlabsModule  | `/tax-slabs` | Tax slab & sub-tax CRUD, tax engine  |
-| PayrollsModule  | `/payrolls`  | Payroll generation & listing         |
-| ReportsModule   | `/reports`   | PDF/CSV export                       |
-| DashboardModule | `/dashboard` | Aggregate statistics                 |
-| UsersModule     | —            | User entity, admin seeding           |
+| Module          | Path prefix     | Responsibility |
+|-----------------|-----------------|----------------|
+| AuthModule      | `/auth`         | JWT login, profile |
+| EmployeesModule | `/employees`    | Employee CRUD |
+| TaxSlabsModule  | `/tax-slabs`    | Tax slabs, sub-taxes, tax calculation, **tax overview** |
+| GpFundModule    | `/gp-fund`      | GP scales, **GP fund overview**, annual records |
+| PayrollsModule  | `/payrolls`     | Payroll generation (taxes + GP fund), salary slips |
+| DashboardModule | `/dashboard`    | Combined dashboard stats |
+| ReportsModule   | `/reports`      | PDF/CSV export |
+| RbacModule      | —               | Roles & permissions seed |
+| UsersModule     | —               | Admin user seeding |
+
+Payroll flow: `computePayrollGross()` → `TaxSlabsService.calculateTaxes()` → GP fund from scale → snapshot deductions.
+
+Tax overview and GP fund overview use **separate** aggregation; taxes exclude `GP_FUND` deductions.
+
+See root [README.md](../README.md) and [docs/PLAYBOOK.md](../docs/PLAYBOOK.md).
 
 ## Running
 
@@ -22,14 +30,16 @@ npm install
 npm run dev
 ```
 
-Requires local MySQL (MySQL Workbench). Run `backend/scripts/setup-database.sql` first, then set credentials in `.env`.
+Requires local MySQL. Run `scripts/setup-database.sql`, then configure `.env`.
 
 ## Validation
 
-All DTOs use `class-validator`. The global `ValidationPipe` strips unknown fields (`whitelist: true`) and rejects extra properties (`forbidNonWhitelisted: true`).
+DTOs use `class-validator`. Global `ValidationPipe`: `whitelist: true`, `forbidNonWhitelisted: true`.
 
 ## Seeding
 
 On module init:
-- `RbacSeedService` creates roles and permissions
-- `UsersSeedService` creates admin users from `.env` if passwords are configured
+
+- `RbacSeedService` — roles and permissions
+- `UsersSeedService` — admin users from `.env` when passwords are set
+- GP fund default scales `B-1` … `B-22` created on first access to scales API if missing

@@ -11,6 +11,7 @@ import { Payroll } from './payroll.entity';
 export enum DeductionCategory {
   INCOME_TAX = 'income_tax',
   SUB_TAX = 'sub_tax',
+  GP_FUND = 'gp_fund',
 }
 
 export enum DeductionCalculationType {

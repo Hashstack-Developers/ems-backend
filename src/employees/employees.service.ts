@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -9,6 +10,7 @@ import { NoChangesException } from '../common/exceptions/no-changes.exception';
 import { isSameOptionalString } from '../common/utils/change-detection';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
+import { buildEmployeeCodeFromCnic } from './employee.utils';
 import { Employee, EmployeeStatus } from './entities/employee.entity';
 
 const NUMERIC_FIELDS = [
@@ -50,8 +52,10 @@ const NUMERIC_FIELDS = [
 const OPTIONAL_STRING_FIELDS = [
   'srNo',
   'fatherName',
+  'address',
   'basicPayScale',
   'religion',
+  'disability',
   'salaryTill',
   'contractExpiryDate',
   'dateOfRegularization',
@@ -76,10 +80,12 @@ export class EmployeesService {
     await this.ensureUniqueEmail(dto.email);
 
     const normalized = this.normalizeDto(dto);
-    const employeeCode = await this.generateEmployeeCode();
+    const employeeCode = await this.generateEmployeeCode(normalized.cnicNo);
+    const srNo = normalized.srNo ?? (await this.generateSrNo());
     const employee = this.employeesRepository.create({
       ...normalized,
       employeeCode,
+      srNo,
       status: normalized.status ?? EmployeeStatus.ACTIVE,
     });
     return this.employeesRepository.save(employee);
@@ -152,14 +158,35 @@ export class EmployeesService {
     return normalized as T;
   }
 
-  private async generateEmployeeCode(): Promise<string> {
+  private async generateEmployeeCode(cnicNo?: string): Promise<string> {
+    const employeeCode = buildEmployeeCodeFromCnic(cnicNo);
+    if (!employeeCode) {
+      throw new BadRequestException(
+        'Valid CNIC is required to generate employee code (format: XXXXX-XXXXXXX-X)',
+      );
+    }
+
+    const existing = await this.employeesRepository.findOne({
+      where: { employeeCode },
+    });
+    if (existing) {
+      throw new ConflictException(
+        `Employee with code ${employeeCode} already exists`,
+      );
+    }
+
+    return employeeCode;
+  }
+
+  private async generateSrNo(): Promise<string> {
     const result = await this.employeesRepository
       .createQueryBuilder('e')
-      .select('MAX(e.id)', 'maxId')
-      .getRawOne<{ maxId: string | null }>();
+      .select('MAX(CAST(e.sr_no AS UNSIGNED))', 'maxSr')
+      .where('e.sr_no REGEXP :pattern', { pattern: '^[0-9]+$' })
+      .getRawOne<{ maxSr: string | null }>();
 
-    const nextId = (result?.maxId ? parseInt(result.maxId, 10) : 0) + 1;
-    return `EMP-${String(nextId).padStart(4, '0')}`;
+    const next = (result?.maxSr ? parseInt(result.maxSr, 10) : 0) + 1;
+    return String(next);
   }
 
   private hasChanges(employee: Employee, dto: UpdateEmployeeDto): boolean {

@@ -1,17 +1,75 @@
 import { Employee } from './entities/employee.entity';
 
+export const STANDARD_PAYROLL_MONTH_DAYS = 30;
+export const EMPLOYEE_CODE_PREFIX = 'WCLA';
+
+export function extractCnicMiddleSegment(
+  cnicNo: string | null | undefined,
+): string | null {
+  if (!cnicNo) return null;
+  const digits = cnicNo.replace(/\D/g, '');
+  if (digits.length !== 13) return null;
+  return digits.slice(5, 12);
+}
+
+export function buildEmployeeCodeFromCnic(
+  cnicNo: string | null | undefined,
+): string | null {
+  const middle = extractCnicMiddleSegment(cnicNo);
+  if (!middle) return null;
+  return `${EMPLOYEE_CODE_PREFIX}-${middle}`;
+}
+
 export function getEmployeeFullName(employee: Pick<Employee, 'name'>): string {
   return employee.name;
 }
 
+/** Monthly salary base for payroll & tax slabs (employee field: Gross Salary with Taxes). */
 export function getEmployeePayrollGross(employee: Employee): number {
-  if (employee.grossSalary != null && Number(employee.grossSalary) > 0) {
-    return Number(employee.grossSalary);
+  if (
+    employee.grossSalaryWithTaxes != null &&
+    Number(employee.grossSalaryWithTaxes) > 0
+  ) {
+    return Number(employee.grossSalaryWithTaxes);
   }
   if (employee.basicPayDec2025 != null && Number(employee.basicPayDec2025) > 0) {
     return Number(employee.basicPayDec2025);
   }
   return 0;
+}
+
+export interface PayrollGrossBreakdown {
+  fullGross: number;
+  payableGross: number;
+  salaryDays: number | null;
+}
+
+function roundCurrency(amount: number): number {
+  return Math.round(amount * 100) / 100;
+}
+
+export function computePayrollGross(employee: Employee): PayrollGrossBreakdown {
+  const fullGross = getEmployeePayrollGross(employee);
+  const daysRaw = employee.timePeriod?.trim();
+
+  if (!daysRaw || !/^\d+$/.test(daysRaw)) {
+    return { fullGross, payableGross: fullGross, salaryDays: null };
+  }
+
+  const salaryDays = parseInt(daysRaw, 10);
+  if (salaryDays <= 0 || salaryDays >= STANDARD_PAYROLL_MONTH_DAYS) {
+    return {
+      fullGross,
+      payableGross: fullGross,
+      salaryDays: salaryDays >= STANDARD_PAYROLL_MONTH_DAYS ? STANDARD_PAYROLL_MONTH_DAYS : null,
+    };
+  }
+
+  return {
+    fullGross,
+    payableGross: roundCurrency(fullGross * (salaryDays / STANDARD_PAYROLL_MONTH_DAYS)),
+    salaryDays,
+  };
 }
 
 export function computeRetirementDate(dateOfBirth: string): string {

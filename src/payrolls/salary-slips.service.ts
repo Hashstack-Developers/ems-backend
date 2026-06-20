@@ -39,6 +39,7 @@ export interface SalarySlip {
   earnings: {
     basicSalary: number;
     grossSalary: number;
+    salaryDays?: number | null;
   };
   deductions: SalarySlipDeduction[];
   summary: {
@@ -282,6 +283,7 @@ export class SalarySlipsService {
       earnings: {
         basicSalary: Number(payroll.basicSalary),
         grossSalary: Number(payroll.grossSalary),
+        salaryDays: payroll.salaryDays,
       },
       deductions: (payroll.deductions ?? []).map((d) => ({
         name: d.name,
@@ -352,7 +354,12 @@ export class SalarySlipsService {
 
         doc.fontSize(12).text('Earnings');
         doc.fontSize(10).fillColor('#444');
-        doc.text(`Basic / Gross Salary: ${slip.earnings.grossSalary.toLocaleString()}`);
+        if (slip.earnings.salaryDays != null && slip.earnings.basicSalary !== slip.earnings.grossSalary) {
+          doc.text(`Full Monthly Gross: ${slip.earnings.basicSalary.toLocaleString()}`);
+          doc.text(`Payable Gross (${slip.earnings.salaryDays} days): ${slip.earnings.grossSalary.toLocaleString()}`);
+        } else {
+          doc.text(`Basic / Gross Salary: ${slip.earnings.grossSalary.toLocaleString()}`);
+        }
         doc.moveDown(0.5);
 
         doc.fontSize(12).fillColor('#000').text('Deductions (snapshot at payroll time)');

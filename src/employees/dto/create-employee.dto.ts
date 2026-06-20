@@ -10,7 +10,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { EmploymentType, EmployeeStatus } from '../entities/employee.entity';
+import { EmploymentType, EmployeeStatus, DisabilityStatus } from '../entities/employee.entity';
 
 export class CreateEmployeeDto {
   @IsOptional()
@@ -28,6 +28,11 @@ export class CreateEmployeeDto {
   @MaxLength(200)
   fatherName?: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  address?: string;
+
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
@@ -42,6 +47,10 @@ export class CreateEmployeeDto {
   @IsString()
   @MaxLength(100)
   religion?: string;
+
+  @IsOptional()
+  @IsEnum(DisabilityStatus)
+  disability?: DisabilityStatus;
 
   @IsOptional()
   @IsDateString()
@@ -101,7 +110,10 @@ export class CreateEmployeeDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxLength(10)
+  @Matches(/^(?:[1-9]|[12][0-9]|30)?$/, {
+    message: 'Time period must be a number of days between 1 and 30',
+  })
   timePeriod?: string;
 
   @IsOptional()
@@ -250,9 +262,9 @@ export class CreateEmployeeDto {
   incomeTaxMay2026?: number;
 
   @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  gpFund?: number;
+  @IsString()
+  @MaxLength(10)
+  gpFund?: string;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })

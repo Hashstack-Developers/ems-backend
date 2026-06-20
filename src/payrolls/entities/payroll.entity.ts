@@ -45,6 +45,9 @@ export class Payroll {
   @Column({ name: 'gross_salary', type: 'decimal', precision: 12, scale: 2 })
   grossSalary: number;
 
+  @Column({ name: 'salary_days', type: 'int', nullable: true })
+  salaryDays: number | null;
+
   @Column({ name: 'income_tax', type: 'decimal', precision: 12, scale: 2 })
   incomeTax: number;
 

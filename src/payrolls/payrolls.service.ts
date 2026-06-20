@@ -6,8 +6,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EmployeesService } from '../employees/employees.service';
-import { getEmployeeFullName, getEmployeePayrollGross } from '../employees/employee.utils';
+import { computePayrollGross, getEmployeeFullName } from '../employees/employee.utils';
 import { Employee, EmployeeStatus } from '../employees/entities/employee.entity';
+import { GP_FUND_DEDUCTION_CODE } from '../gp-fund/gp-fund.utils';
+import { GpFundService } from '../gp-fund/gp-fund.service';
 import { TaxSlabsService } from '../tax-slabs/tax-slabs.service';
 import { GeneratePayrollDto } from './dto/generate-payroll.dto';
 import {
@@ -66,6 +68,7 @@ export class PayrollsService {
     private readonly deductionsRepository: Repository<PayrollDeduction>,
     private readonly employeesService: EmployeesService,
     private readonly taxSlabsService: TaxSlabsService,
+    private readonly gpFundService: GpFundService,
   ) {}
 
   async generate(dto: GeneratePayrollDto): Promise<PayrollGenerationResult> {
@@ -347,18 +350,23 @@ export class PayrollsService {
     month: number,
     year: number,
   ): Promise<Payroll> {
-    const grossSalary = getEmployeePayrollGross(employee);
-    const taxResult = await this.taxSlabsService.calculateTaxes(grossSalary);
+    const { fullGross, payableGross, salaryDays } = computePayrollGross(employee);
+    const taxResult = await this.taxSlabsService.calculateTaxes(payableGross);
+    const scaleMap = await this.gpFundService.getScaleValueMap();
+    const gpFund = this.gpFundService.resolveGpFundAmountForEmployee(employee, scaleMap);
+    const totalDeductions = this.round(taxResult.totalDeductions + gpFund.amount);
+    const netSalary = this.round(payableGross - totalDeductions);
 
     const payroll = this.payrollsRepository.create({
       employeeId: employee.id,
       month,
       year,
-      basicSalary: grossSalary,
-      grossSalary,
+      basicSalary: fullGross,
+      grossSalary: payableGross,
+      salaryDays,
       incomeTax: taxResult.incomeTax,
-      totalDeductions: taxResult.totalDeductions,
-      netSalary: taxResult.netSalary,
+      totalDeductions,
+      netSalary,
       taxSlabId: taxResult.taxSlab?.id ?? null,
       taxSlabName: taxResult.taxSlab?.name ?? 'No applicable slab',
       appliedTaxRate: taxResult.taxSlab?.taxRate != null
@@ -423,6 +431,20 @@ export class PayrollsService {
         appliedRate: isPercentage ? Number(item.subTax.rate) : null,
         appliedFixedAmount: isPercentage ? null : Number(item.subTax.amount),
         sourceSubTaxId: item.subTax.id,
+      });
+    }
+
+    if (gpFund.amount > 0 && gpFund.scaleCode) {
+      deductions.push({
+        payrollId: savedPayroll.id,
+        name: `GP Fund (${gpFund.scaleCode})`,
+        code: GP_FUND_DEDUCTION_CODE,
+        category: DeductionCategory.GP_FUND,
+        amount: gpFund.amount,
+        calculationType: DeductionCalculationType.FIXED,
+        appliedRate: null,
+        appliedFixedAmount: gpFund.subscriptionValue,
+        sourceSubTaxId: null,
       });
     }
 
