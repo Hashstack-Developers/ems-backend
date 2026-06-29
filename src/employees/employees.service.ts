@@ -29,6 +29,7 @@ const NUMERIC_FIELDS = [
   'overtimeAllowance',
   'integratedAllowance',
   'wa',
+  'computerAllowance',
   'specialAllowance',
   'specialPay',
   'mphilSpecialAllowance',

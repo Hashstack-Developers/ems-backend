@@ -160,6 +160,9 @@ export class Employee {
   @Column(salaryColumn('wa_allowance'))
   wa: number | null;
 
+  @Column(salaryColumn('computer_allowance'))
+  computerAllowance: number | null;
+
   @Column(salaryColumn('special_allowance'))
   specialAllowance: number | null;
 

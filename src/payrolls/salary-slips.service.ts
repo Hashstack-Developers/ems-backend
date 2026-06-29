@@ -5,54 +5,25 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ZipArchive, type Archiver } from 'archiver';
+import * as fs from 'fs';
+import * as path from 'path';
 import PDFDocument from 'pdfkit';
 import { Repository } from 'typeorm';
 import { EmployeesService } from '../employees/employees.service';
-import { getEmployeeFullName } from '../employees/employee.utils';
+import { GpFundAdvanceService } from '../gp-fund/gp-fund-advance.service';
 import { DownloadSalarySlipsZipDto } from './dto/download-salary-slips-zip.dto';
 import { GenerateSalarySlipDto } from './dto/generate-salary-slip.dto';
 import { Payroll, PayrollStatus } from './entities/payroll.entity';
+import {
+  buildSalarySlipPayload,
+  SalarySlipLineItem,
+  SalarySlipPayload,
+  SalarySlipRecoverySection,
+} from './salary-slip.builder';
+import { SALARY_SLIP_LOGOS } from './salary-slip.constants';
 
-export interface SalarySlipDeduction {
-  name: string;
-  code: string;
-  category: string;
-  calculationType: string | null;
-  appliedRate: number | null;
-  appliedFixedAmount: number | null;
-  amount: number;
-}
-
-export interface SalarySlip {
-  payrollId: number;
-  slipNumber: string;
-  period: { month: number; year: number; label: string };
-  employee: {
-    id: number;
-    employeeCode: string;
-    fullName: string;
-    stage: string;
-    designation: string;
-    email: string;
-    dateOfJoining: string;
-  };
-  earnings: {
-    basicSalary: number;
-    grossSalary: number;
-    salaryDays?: number | null;
-  };
-  deductions: SalarySlipDeduction[];
-  summary: {
-    grossSalary: number;
-    totalDeductions: number;
-    netSalary: number;
-    incomeTax: number;
-    taxSlabName: string | null;
-    appliedTaxRate: number | null;
-  };
-  status: PayrollStatus;
-  generatedAt: string;
-}
+export type SalarySlip = SalarySlipPayload;
+export type SalarySlipDeduction = SalarySlipPayload['rawDeductions'][number];
 
 export interface SalarySlipAvailability {
   employeeId: number;
@@ -77,6 +48,7 @@ export class SalarySlipsService {
     @InjectRepository(Payroll)
     private readonly payrollsRepository: Repository<Payroll>,
     private readonly employeesService: EmployeesService,
+    private readonly gpFundAdvanceService: GpFundAdvanceService,
   ) {}
 
   async getAvailability(month: number, year: number): Promise<SalarySlipAvailability[]> {
@@ -108,7 +80,7 @@ export class SalarySlipsService {
       return {
         employeeId: emp.id,
         employeeCode: emp.employeeCode,
-        fullName: getEmployeeFullName(emp),
+        fullName: emp.name,
         stage: emp.stage ?? '',
         designation: emp.designation,
         payrollId: payroll?.id ?? null,
@@ -163,7 +135,7 @@ export class SalarySlipsService {
       );
     }
 
-    const slip = this.mapPayrollToSlip(payroll);
+    const slip = await this.mapPayrollToSlip(payroll);
     const buffer = await this.renderPdf(slip);
     return {
       buffer,
@@ -236,7 +208,7 @@ export class SalarySlipsService {
           throw new BadRequestException('Employee details are missing for payroll');
         }
 
-        const slip = this.mapPayrollToSlip(payroll);
+        const slip = await this.mapPayrollToSlip(payroll);
         const buffer = await this.renderPdf(slip);
         let filename = `${slip.slipNumber}.pdf`;
         let counter = 1;
@@ -259,54 +231,9 @@ export class SalarySlipsService {
     return { added, failures };
   }
 
-  private mapPayrollToSlip(payroll: Payroll): SalarySlip {
-    const emp = payroll.employee;
-    const monthLabel = MONTH_NAMES[payroll.month - 1];
-
-    return {
-      payrollId: payroll.id,
-      slipNumber: `SLIP-${payroll.year}-${String(payroll.month).padStart(2, '0')}-${emp.employeeCode}`,
-      period: {
-        month: payroll.month,
-        year: payroll.year,
-        label: `${monthLabel} ${payroll.year}`,
-      },
-      employee: {
-        id: emp.id,
-        employeeCode: emp.employeeCode,
-        fullName: getEmployeeFullName(emp),
-        stage: emp.stage ?? '',
-        designation: emp.designation,
-        email: emp.email,
-        dateOfJoining: emp.dateOfJoining,
-      },
-      earnings: {
-        basicSalary: Number(payroll.basicSalary),
-        grossSalary: Number(payroll.grossSalary),
-        salaryDays: payroll.salaryDays,
-      },
-      deductions: (payroll.deductions ?? []).map((d) => ({
-        name: d.name,
-        code: d.code,
-        category: d.category,
-        calculationType: d.calculationType,
-        appliedRate: d.appliedRate != null ? Number(d.appliedRate) : null,
-        appliedFixedAmount:
-          d.appliedFixedAmount != null ? Number(d.appliedFixedAmount) : null,
-        amount: Number(d.amount),
-      })),
-      summary: {
-        grossSalary: Number(payroll.grossSalary),
-        totalDeductions: Number(payroll.totalDeductions),
-        netSalary: Number(payroll.netSalary),
-        incomeTax: Number(payroll.incomeTax),
-        taxSlabName: payroll.taxSlabName,
-        appliedTaxRate:
-          payroll.appliedTaxRate != null ? Number(payroll.appliedTaxRate) : null,
-      },
-      status: payroll.status,
-      generatedAt: new Date().toISOString(),
-    };
+  private async mapPayrollToSlip(payroll: Payroll): Promise<SalarySlip> {
+    const advance = await this.gpFundAdvanceService.findActiveForEmployee(payroll.employeeId);
+    return buildSalarySlipPayload(payroll, advance);
   }
 
   private isPayrollEligible(payroll?: Payroll | null): boolean {
@@ -326,76 +253,200 @@ export class SalarySlipsService {
     }
   }
 
+  private formatAmount(value: number): string {
+    return value.toLocaleString('en-PK', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  private getSalarySlipLogoPath(filename: string): string {
+    return path.join(__dirname, '..', 'assets', 'salary-slip', filename);
+  }
+
+  private formatDeductionAmount(item: SalarySlipLineItem | undefined): string {
+    if (!item) return '';
+    if (item.label === 'Other' && item.amount <= 0) return '';
+    return this.formatAmount(item.amount);
+  }
+
+  private drawPayDeductionTableRow(
+    doc: InstanceType<typeof PDFDocument>,
+    y: number,
+    left: number,
+    colWidths: [number, number, number, number],
+    rowHeight: number,
+    cells: [string, string, string, string],
+    bold = false,
+  ) {
+    let x = left;
+    colWidths.forEach((width, index) => {
+      doc.rect(x, y, width, rowHeight).stroke();
+      const align = index % 2 === 1 ? 'right' : 'left';
+      doc
+        .font(bold ? 'Helvetica-Bold' : 'Helvetica')
+        .fontSize(bold ? 9 : 8)
+        .text(cells[index], x + 4, y + 4, { width: width - 8, align });
+      x += width;
+    });
+  }
+
   private renderPdf(slip: SalarySlip): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       try {
-        const doc = new PDFDocument({ margin: 50, size: 'A4' });
+        const doc = new PDFDocument({ margin: 36, size: 'A4' });
         const chunks: Buffer[] = [];
+        const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+        const left = doc.page.margins.left;
+        const logoSize = 52;
 
         doc.on('data', (chunk: Buffer) => chunks.push(chunk));
         doc.on('end', () => resolve(Buffer.concat(chunks)));
 
-        doc.fontSize(18).text('Employee Management System', { align: 'center' });
-        doc.fontSize(14).text('Salary Slip', { align: 'center' });
-        doc.moveDown(0.5);
-        doc.fontSize(10).fillColor('#666').text(slip.slipNumber, { align: 'center' });
-        doc.text(`Period: ${slip.period.label}`, { align: 'center' });
-        doc.text(`Generated: ${new Date(slip.generatedAt).toLocaleString()}`, { align: 'center' });
-        doc.moveDown(1);
-        doc.fillColor('#000');
+        const headerY = doc.y;
+        const leftLogoPath = this.getSalarySlipLogoPath(SALARY_SLIP_LOGOS.left);
+        const rightLogoPath = this.getSalarySlipLogoPath(SALARY_SLIP_LOGOS.right);
 
-        doc.fontSize(12).text('Employee Details');
-        doc.fontSize(10).fillColor('#444');
-        doc.text(`Name: ${slip.employee.fullName}`);
-        doc.text(`Code: ${slip.employee.employeeCode}`);
-        doc.text(`Stage: ${slip.employee.stage} | Designation: ${slip.employee.designation}`);
-        doc.moveDown(1);
-        doc.fillColor('#000');
-
-        doc.fontSize(12).text('Earnings');
-        doc.fontSize(10).fillColor('#444');
-        if (slip.earnings.salaryDays != null && slip.earnings.basicSalary !== slip.earnings.grossSalary) {
-          doc.text(`Full Monthly Gross: ${slip.earnings.basicSalary.toLocaleString()}`);
-          doc.text(`Payable Gross (${slip.earnings.salaryDays} days): ${slip.earnings.grossSalary.toLocaleString()}`);
-        } else {
-          doc.text(`Basic / Gross Salary: ${slip.earnings.grossSalary.toLocaleString()}`);
+        if (fs.existsSync(leftLogoPath)) {
+          doc.image(leftLogoPath, left, headerY, { fit: [logoSize, logoSize] });
         }
-        doc.moveDown(0.5);
-
-        doc.fontSize(12).fillColor('#000').text('Deductions (snapshot at payroll time)');
-        doc.fontSize(10).fillColor('#444');
-        if (slip.deductions.length === 0) {
-          doc.text('No deductions');
-        } else {
-          for (const d of slip.deductions) {
-            const rate =
-              d.calculationType === 'percentage' && d.appliedRate != null
-                ? ` @ ${d.appliedRate}%`
-                : d.calculationType === 'fixed' && d.appliedFixedAmount != null
-                  ? ` (fixed ${d.appliedFixedAmount.toLocaleString()})`
-                  : '';
-            doc.text(`${d.name} (${d.code})${rate}: ${d.amount.toLocaleString()}`);
-          }
+        if (fs.existsSync(rightLogoPath)) {
+          doc.image(rightLogoPath, left + pageWidth - logoSize, headerY, {
+            fit: [logoSize, logoSize],
+          });
         }
 
-        doc.moveDown(1);
-        doc.fontSize(12).fillColor('#000').text('Summary');
-        doc.fontSize(10).fillColor('#444');
-        if (slip.summary.taxSlabName) {
-          const rate =
-            slip.summary.appliedTaxRate != null
-              ? ` @ ${slip.summary.appliedTaxRate}%`
-              : '';
-          doc.text(`Tax Slab: ${slip.summary.taxSlabName}${rate}`);
+        const titleY = headerY + 4;
+        doc.font('Helvetica-Bold').fontSize(13).text(slip.organization.title, left, titleY, {
+          width: pageWidth,
+          align: 'center',
+        });
+        doc.fontSize(11).text(slip.organization.subtitle, { align: 'center' });
+        doc.moveDown(0.2);
+        doc.fontSize(12).text(slip.organization.documentTitle, { align: 'center', underline: true });
+        doc.y = Math.max(doc.y, headerY + logoSize + 6);
+        doc.moveDown(0.4);
+
+        doc.font('Helvetica').fontSize(9);
+        doc.text(`Dated: ${slip.dated}`, left, doc.y, { width: pageWidth / 2 });
+        doc.text(`For the Month of ${slip.period.year}: ${MONTH_NAMES[slip.period.month - 1]}`, {
+          width: pageWidth,
+          align: 'right',
+        });
+        doc.moveDown(0.6);
+
+        const colWidth = pageWidth / 3;
+        const infoRows = slip.employeeInfoFields.map(
+          (field) => [field.label, field.value] as [string, string],
+        );
+
+        const startY = doc.y;
+        infoRows.forEach(([label, value], index) => {
+          const col = index % 3;
+          const row = Math.floor(index / 3);
+          const x = left + col * colWidth;
+          const y = startY + row * 28;
+          doc.font('Helvetica-Bold').fontSize(8).text(`${label}:`, x, y, { width: colWidth - 8 });
+          doc.font('Helvetica').fontSize(8).text(value, x, y + 10, { width: colWidth - 8 });
+        });
+        doc.y = startY + Math.ceil(Math.max(infoRows.length, 1) / 3) * 28 + 8;
+
+        const tableTop = doc.y;
+        const half = pageWidth / 2;
+        const labelColW = half * 0.72;
+        const amountColW = half * 0.28;
+        const colWidths: [number, number, number, number] = [
+          labelColW,
+          amountColW,
+          labelColW,
+          amountColW,
+        ];
+        const rowHeight = 16;
+
+        this.drawPayDeductionTableRow(
+          doc,
+          tableTop,
+          left,
+          colWidths,
+          rowHeight,
+          ['Pay & Allowances', 'Amount (Rs.)', 'Deductions', 'Amounts (Rs.)'],
+          true,
+        );
+
+        const maxRows = Math.max(slip.allowances.length, slip.deductions.length, 1);
+        let y = tableTop + rowHeight;
+        for (let i = 0; i < maxRows; i += 1) {
+          const allowance = slip.allowances[i];
+          const deduction = slip.deductions[i];
+          this.drawPayDeductionTableRow(
+            doc,
+            y,
+            left,
+            colWidths,
+            rowHeight,
+            [
+              allowance?.label ?? '',
+              allowance ? this.formatAmount(allowance.amount) : '',
+              deduction?.label ?? '',
+              this.formatDeductionAmount(deduction),
+            ],
+          );
+          y += rowHeight;
         }
-        doc.text(`Gross: ${slip.summary.grossSalary.toLocaleString()}`);
-        doc.text(`Total Deductions: ${slip.summary.totalDeductions.toLocaleString()}`);
-        doc.fontSize(11).fillColor('#000').text(`Net Salary: ${slip.summary.netSalary.toLocaleString()}`, { underline: true });
+
+        doc.y = y + 8;
+        this.drawRecoveryTable(doc, slip.loanRecovery, left, pageWidth);
+        this.drawRecoveryTable(doc, slip.taxRecovery, left, pageWidth);
+
+        const summaryY = doc.y + 4;
+        const summaryCols = pageWidth / 3;
+        doc.rect(left, summaryY, pageWidth, rowHeight).stroke();
+        doc.font('Helvetica-Bold').fontSize(9)
+          .text(`Gross Salary: ${this.formatAmount(slip.summary.grossSalary)}`, left + 4, summaryY + 4, { width: summaryCols - 8 })
+          .text(`Deduction: ${this.formatAmount(slip.summary.totalDeductions)}`, left + summaryCols + 4, summaryY + 4, { width: summaryCols - 8, align: 'center' })
+          .text(`Net Pay: ${this.formatAmount(slip.summary.netSalary)}`, left + summaryCols * 2 + 4, summaryY + 4, { width: summaryCols - 8, align: 'right' });
+        doc.y = summaryY + rowHeight + 10;
+
+        doc.font('Helvetica-Bold').fontSize(8).text('NOTE', left);
+        doc.font('Helvetica').fontSize(7);
+        slip.notes.forEach((note) => {
+          doc.text(`• ${note}`, left, doc.y, { width: pageWidth });
+        });
 
         doc.end();
       } catch (err) {
         reject(err);
       }
     });
+  }
+
+  private drawRecoveryTable(
+    doc: InstanceType<typeof PDFDocument>,
+    section: SalarySlipRecoverySection | null,
+    left: number,
+    pageWidth: number,
+  ) {
+    if (!section) return;
+    const rowHeight = 16;
+    const y = doc.y;
+    doc.rect(left, y, pageWidth, rowHeight).stroke();
+    doc.font('Helvetica-Bold').fontSize(8).text(section.title, left + 4, y + 4);
+    doc.y = y + rowHeight;
+
+    const colW = pageWidth / 3;
+    const labels = ['Payable', 'Recovered till', 'Recoverable'];
+    const values = [
+      this.formatAmount(section.payable),
+      this.formatAmount(section.recoveredTill),
+      this.formatAmount(section.recoverable),
+    ];
+    const rowY = doc.y;
+    labels.forEach((label, index) => {
+      const x = left + index * colW;
+      doc.rect(x, rowY, colW, rowHeight * 2).stroke();
+      doc.font('Helvetica-Bold').fontSize(7).text(label, x + 4, rowY + 4, { width: colW - 8, align: 'center' });
+      doc.font('Helvetica').fontSize(8).text(values[index], x + 4, rowY + rowHeight + 2, { width: colW - 8, align: 'center' });
+    });
+    doc.y = rowY + rowHeight * 2 + 6;
   }
 }

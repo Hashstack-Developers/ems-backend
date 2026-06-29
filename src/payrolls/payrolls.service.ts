@@ -8,7 +8,8 @@ import { Repository } from 'typeorm';
 import { EmployeesService } from '../employees/employees.service';
 import { computePayrollGross, getEmployeeFullName } from '../employees/employee.utils';
 import { Employee, EmployeeStatus } from '../employees/entities/employee.entity';
-import { GP_FUND_DEDUCTION_CODE } from '../gp-fund/gp-fund.utils';
+import { GP_FUND_ANNUAL_MARKUP_CODE, GP_FUND_ADVANCE_CODE, GP_FUND_DEDUCTION_CODE, GP_FUND_MONTHLY_MARKUP_CODE } from '../gp-fund/gp-fund.utils';
+import { GpFundAdvanceService } from '../gp-fund/gp-fund-advance.service';
 import { GpFundService } from '../gp-fund/gp-fund.service';
 import { TaxSlabsService } from '../tax-slabs/tax-slabs.service';
 import { GeneratePayrollDto } from './dto/generate-payroll.dto';
@@ -69,6 +70,7 @@ export class PayrollsService {
     private readonly employeesService: EmployeesService,
     private readonly taxSlabsService: TaxSlabsService,
     private readonly gpFundService: GpFundService,
+    private readonly gpFundAdvanceService: GpFundAdvanceService,
   ) {}
 
   async generate(dto: GeneratePayrollDto): Promise<PayrollGenerationResult> {
@@ -216,6 +218,7 @@ export class PayrollsService {
 
   async remove(id: number): Promise<void> {
     const payroll = await this.findOne(id);
+    await this.gpFundAdvanceService.revertPaymentForPayroll(payroll.id);
     await this.payrollsRepository.remove(payroll);
   }
 
@@ -353,8 +356,22 @@ export class PayrollsService {
     const { fullGross, payableGross, salaryDays } = computePayrollGross(employee);
     const taxResult = await this.taxSlabsService.calculateTaxes(payableGross);
     const scaleMap = await this.gpFundService.getScaleValueMap();
-    const gpFund = this.gpFundService.resolveGpFundAmountForEmployee(employee, scaleMap);
-    const totalDeductions = this.round(taxResult.totalDeductions + gpFund.amount);
+    const markupSettings = await this.gpFundService.getMarkupSettings();
+    const markupRates = this.gpFundService.getMarkupRatesFromSettings(markupSettings);
+    const gpFund = await this.gpFundService.resolveGpFundWithMarkupForPayroll(
+      employee,
+      scaleMap,
+      markupRates,
+      month,
+      year,
+    );
+    const advanceInstallment = await this.gpFundAdvanceService.resolveInstallmentForPayroll(
+      employee.id,
+    );
+    const totalGpFundDeductions = this.round(
+      gpFund.totalAmount + (advanceInstallment?.amount ?? 0),
+    );
+    const totalDeductions = this.round(taxResult.totalDeductions + totalGpFundDeductions);
     const netSalary = this.round(payableGross - totalDeductions);
 
     const payroll = this.payrollsRepository.create({
@@ -434,13 +451,13 @@ export class PayrollsService {
       });
     }
 
-    if (gpFund.amount > 0 && gpFund.scaleCode) {
+    if (gpFund.baseAmount > 0 && gpFund.scaleCode) {
       deductions.push({
         payrollId: savedPayroll.id,
         name: `GP Fund (${gpFund.scaleCode})`,
         code: GP_FUND_DEDUCTION_CODE,
         category: DeductionCategory.GP_FUND,
-        amount: gpFund.amount,
+        amount: gpFund.baseAmount,
         calculationType: DeductionCalculationType.FIXED,
         appliedRate: null,
         appliedFixedAmount: gpFund.subscriptionValue,
@@ -448,8 +465,60 @@ export class PayrollsService {
       });
     }
 
+    if (gpFund.monthlyMarkupAmount > 0 && gpFund.scaleCode) {
+      deductions.push({
+        payrollId: savedPayroll.id,
+        name: `GP Fund Monthly Markup (${markupRates.monthlyMarkupRate}%)`,
+        code: GP_FUND_MONTHLY_MARKUP_CODE,
+        category: DeductionCategory.GP_FUND,
+        amount: gpFund.monthlyMarkupAmount,
+        calculationType: DeductionCalculationType.PERCENTAGE,
+        appliedRate: markupRates.monthlyMarkupRate,
+        appliedFixedAmount: gpFund.baseAmount,
+        sourceSubTaxId: null,
+      });
+    }
+
+    if (gpFund.annualMarkupAmount > 0 && gpFund.scaleCode) {
+      deductions.push({
+        payrollId: savedPayroll.id,
+        name: `GP Fund Annual Markup (${markupRates.annualMarkupRate}%)`,
+        code: GP_FUND_ANNUAL_MARKUP_CODE,
+        category: DeductionCategory.GP_FUND,
+        amount: gpFund.annualMarkupAmount,
+        calculationType: DeductionCalculationType.PERCENTAGE,
+        appliedRate: markupRates.annualMarkupRate,
+        appliedFixedAmount: null,
+        sourceSubTaxId: null,
+      });
+    }
+
+    if (advanceInstallment && advanceInstallment.amount > 0) {
+      deductions.push({
+        payrollId: savedPayroll.id,
+        name: `GP Fund Advance Installment (${advanceInstallment.installmentNumber}/${advanceInstallment.installmentMonths})`,
+        code: GP_FUND_ADVANCE_CODE,
+        category: DeductionCategory.GP_FUND,
+        amount: advanceInstallment.amount,
+        calculationType: DeductionCalculationType.FIXED,
+        appliedRate: null,
+        appliedFixedAmount: advanceInstallment.monthlyInstallment,
+        sourceSubTaxId: null,
+      });
+    }
+
     if (deductions.length > 0) {
       await this.deductionsRepository.save(deductions);
+    }
+
+    if (advanceInstallment && advanceInstallment.amount > 0) {
+      await this.gpFundAdvanceService.recordPayrollInstallment(
+        advanceInstallment.advanceId,
+        savedPayroll.id,
+        advanceInstallment.amount,
+        month,
+        year,
+      );
     }
 
     return this.findOne(savedPayroll.id);

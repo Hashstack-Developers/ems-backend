@@ -199,6 +199,11 @@ export class CreateEmployeeDto {
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  computerAllowance?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   specialAllowance?: number;
 
   @IsOptional()

@@ -15,8 +15,19 @@ import { CreateGpFundRecordDto } from './dto/create-gp-fund-record.dto';
 import { UpdateGpFundScaleDto } from './dto/update-gp-fund-scale.dto';
 import { UpdateGpFundRecordDto } from './dto/update-gp-fund-record.dto';
 import { GpFundRecord } from './entities/gp-fund-record.entity';
+import { GpFundMarkupSettings } from './entities/gp-fund-markup-settings.entity';
 import { GpFundScale } from './entities/gp-fund-scale.entity';
-import { resolveGpFundAmount } from './gp-fund.utils';
+import { UpdateGpFundMarkupDto } from './dto/update-gp-fund-markup.dto';
+import {
+  buildGpFundBreakdown,
+  calculateAnnualMarkupAmount,
+  calculateMonthlyMarkupAmount,
+  GP_FUND_DEDUCTION_CODE,
+  GP_FUND_MONTHLY_MARKUP_CODE,
+  GpFundAmountBreakdown,
+  GpFundMarkupRates,
+  resolveGpFundAmount,
+} from './gp-fund.utils';
 
 const GP_SCALE_CODES = Array.from({ length: 22 }, (_, index) => `B-${index + 1}`);
 
@@ -25,6 +36,8 @@ export class GpFundService {
   constructor(
     @InjectRepository(GpFundRecord)
     private readonly gpFundRepository: Repository<GpFundRecord>,
+    @InjectRepository(GpFundMarkupSettings)
+    private readonly gpFundMarkupRepository: Repository<GpFundMarkupSettings>,
     @InjectRepository(GpFundScale)
     private readonly gpFundScaleRepository: Repository<GpFundScale>,
     @InjectRepository(Employee)
@@ -69,6 +82,109 @@ export class GpFundService {
     scaleMap: Map<string, number>,
   ) {
     return resolveGpFundAmount(employee, scaleMap);
+  }
+
+  async getMarkupSettings(): Promise<GpFundMarkupSettings> {
+    let settings = await this.gpFundMarkupRepository.findOne({ where: { id: 1 } });
+    if (!settings) {
+      settings = this.gpFundMarkupRepository.create({
+        id: 1,
+        monthlyMarkupRate: 0,
+        annualMarkupRate: 0,
+      });
+      await this.gpFundMarkupRepository.save(settings);
+    }
+    return settings;
+  }
+
+  async updateMarkupSettings(dto: UpdateGpFundMarkupDto): Promise<GpFundMarkupSettings> {
+    const settings = await this.getMarkupSettings();
+    const hasChanges =
+      (dto.monthlyMarkupRate !== undefined
+        && Number(dto.monthlyMarkupRate) !== Number(settings.monthlyMarkupRate))
+      || (dto.annualMarkupRate !== undefined
+        && Number(dto.annualMarkupRate) !== Number(settings.annualMarkupRate));
+
+    if (!hasChanges) {
+      throw new NoChangesException();
+    }
+
+    if (dto.monthlyMarkupRate !== undefined) {
+      settings.monthlyMarkupRate = dto.monthlyMarkupRate;
+    }
+    if (dto.annualMarkupRate !== undefined) {
+      settings.annualMarkupRate = dto.annualMarkupRate;
+    }
+
+    return this.gpFundMarkupRepository.save(settings);
+  }
+
+  getMarkupRatesFromSettings(settings: GpFundMarkupSettings): GpFundMarkupRates {
+    return {
+      monthlyMarkupRate: Number(settings.monthlyMarkupRate ?? 0),
+      annualMarkupRate: Number(settings.annualMarkupRate ?? 0),
+    };
+  }
+
+  async resolveGpFundWithMarkupForPayroll(
+    employee: Employee,
+    scaleMap: Map<string, number>,
+    markupRates: GpFundMarkupRates,
+    month: number,
+    year: number,
+  ): Promise<GpFundAmountBreakdown> {
+    const base = resolveGpFundAmount(employee, scaleMap);
+    if (base.amount <= 0 || !base.scaleCode) {
+      return buildGpFundBreakdown(base, markupRates, 0);
+    }
+
+    let annualMarkupAmount = 0;
+    if (month === 12 && markupRates.annualMarkupRate > 0) {
+      const ytd = await this.getYearToDateGpFundTotals(employee.id, year, month);
+      const monthlyMarkupAmount = calculateMonthlyMarkupAmount(
+        base.amount,
+        markupRates.monthlyMarkupRate,
+      );
+      const yearSubtotal = this.round(
+        ytd.baseTotal + ytd.monthlyMarkupTotal + base.amount + monthlyMarkupAmount,
+      );
+      annualMarkupAmount = calculateAnnualMarkupAmount(
+        yearSubtotal,
+        markupRates.annualMarkupRate,
+      );
+    }
+
+    return buildGpFundBreakdown(base, markupRates, annualMarkupAmount);
+  }
+
+  private async getYearToDateGpFundTotals(
+    employeeId: number,
+    year: number,
+    beforeMonth: number,
+  ): Promise<{ baseTotal: number; monthlyMarkupTotal: number }> {
+    const payrolls = await this.payrollsRepository.find({
+      where: { employeeId, year },
+      relations: { deductions: true },
+    });
+
+    let baseTotal = 0;
+    let monthlyMarkupTotal = 0;
+
+    for (const payroll of payrolls) {
+      if (payroll.month >= beforeMonth) continue;
+      for (const deduction of payroll.deductions ?? []) {
+        if (deduction.code === GP_FUND_DEDUCTION_CODE) {
+          baseTotal += Number(deduction.amount);
+        } else if (deduction.code === GP_FUND_MONTHLY_MARKUP_CODE) {
+          monthlyMarkupTotal += Number(deduction.amount);
+        }
+      }
+    }
+
+    return {
+      baseTotal: this.round(baseTotal),
+      monthlyMarkupTotal: this.round(monthlyMarkupTotal),
+    };
   }
 
   async createScale(dto: CreateGpFundScaleDto): Promise<GpFundScale> {

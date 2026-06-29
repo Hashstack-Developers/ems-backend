@@ -5,6 +5,9 @@ import { AuthModule } from './auth/auth.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { GpFundModule } from './gp-fund/gp-fund.module';
 import { GpFundRecord } from './gp-fund/entities/gp-fund-record.entity';
+import { GpFundMarkupSettings } from './gp-fund/entities/gp-fund-markup-settings.entity';
+import { GpFundAdvance } from './gp-fund/entities/gp-fund-advance.entity';
+import { GpFundAdvancePayment } from './gp-fund/entities/gp-fund-advance-payment.entity';
 import { GpFundScale } from './gp-fund/entities/gp-fund-scale.entity';
 import { Employee } from './employees/entities/employee.entity';
 import { EmployeesModule } from './employees/employees.module';
@@ -45,6 +48,9 @@ import { UsersModule } from './users/users.module';
           Payroll,
           PayrollDeduction,
           GpFundRecord,
+          GpFundMarkupSettings,
+          GpFundAdvance,
+          GpFundAdvancePayment,
           GpFundScale,
         ],
         synchronize: true,

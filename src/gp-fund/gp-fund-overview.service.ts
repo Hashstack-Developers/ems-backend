@@ -4,7 +4,9 @@ import { Repository } from 'typeorm';
 import { Payroll } from '../payrolls/entities/payroll.entity';
 import { GpFundOverviewQueryDto } from './dto/gp-fund-overview-query.dto';
 import { GpFundScale } from './entities/gp-fund-scale.entity';
-import { GP_FUND_DEDUCTION_CODE, resolveGpFundAmount } from './gp-fund.utils';
+import { GpFundAdvanceService } from './gp-fund-advance.service';
+import { GpFundService } from './gp-fund.service';
+import { resolvePayrollGpFundDeductions } from './gp-fund.utils';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -22,10 +24,14 @@ export class GpFundOverviewService {
     private readonly payrollsRepository: Repository<Payroll>,
     @InjectRepository(GpFundScale)
     private readonly gpFundScaleRepository: Repository<GpFundScale>,
+    private readonly gpFundService: GpFundService,
+    private readonly gpFundAdvanceService: GpFundAdvanceService,
   ) {}
 
   async getOverview(query: GpFundOverviewQueryDto) {
     const scaleMap = await this.loadScaleMap();
+    const markupSettings = await this.gpFundService.getMarkupSettings();
+    const markupRates = this.gpFundService.getMarkupRatesFromSettings(markupSettings);
     const payrolls = await this.buildPayrollQuery(query).getMany();
     const availableYears = await this.getAvailableYears();
 
@@ -33,9 +39,15 @@ export class GpFundOverviewService {
       payrollCount: 0,
       employeeCount: 0,
       enrolledEmployeeCount: 0,
+      totalBaseCollected: 0,
+      totalMonthlyMarkup: 0,
+      totalAnnualMarkup: 0,
+      totalAdvanceInstallments: 0,
       totalCollected: 0,
       avgMonthlyContribution: 0,
       scaleCount: 0,
+      monthlyMarkupRate: markupRates.monthlyMarkupRate,
+      annualMarkupRate: markupRates.annualMarkupRate,
     };
 
     const monthMap = new Map<string, {
@@ -44,6 +56,9 @@ export class GpFundOverviewService {
       label: string;
       payrollCount: number;
       employeeCount: Set<number>;
+      totalBaseCollected: number;
+      totalMonthlyMarkup: number;
+      totalAnnualMarkup: number;
       totalCollected: number;
     }>();
 
@@ -51,6 +66,9 @@ export class GpFundOverviewService {
       year: number;
       payrollCount: number;
       employeeCount: Set<number>;
+      totalBaseCollected: number;
+      totalMonthlyMarkup: number;
+      totalAnnualMarkup: number;
       totalCollected: number;
     }>();
 
@@ -59,6 +77,9 @@ export class GpFundOverviewService {
       subscriptionValue: number;
       payrollCount: number;
       employeeCount: Set<number>;
+      totalBaseCollected: number;
+      totalMonthlyMarkup: number;
+      totalAnnualMarkup: number;
       totalCollected: number;
     }>();
 
@@ -70,6 +91,9 @@ export class GpFundOverviewService {
       gpFundScale: string | null;
       subscriptionValue: number;
       payrollCount: number;
+      totalBaseCollected: number;
+      totalMonthlyMarkup: number;
+      totalAnnualMarkup: number;
       totalCollected: number;
     }>();
 
@@ -78,15 +102,24 @@ export class GpFundOverviewService {
 
     for (const payroll of payrolls) {
       const employee = payroll.employee;
-      const { scaleCode, subscriptionValue, amount: gpFundAmount } =
-        this.resolvePayrollGpFund(payroll, scaleMap);
+      const breakdown = resolvePayrollGpFundDeductions(
+        payroll.deductions,
+        employee,
+        scaleMap,
+      );
 
-      if (gpFundAmount <= 0) continue;
+      if (breakdown.totalAmount <= 0) continue;
 
       summary.payrollCount += 1;
-      summary.totalCollected = round(summary.totalCollected + gpFundAmount);
+      summary.totalBaseCollected = round(summary.totalBaseCollected + breakdown.baseAmount);
+      summary.totalMonthlyMarkup = round(summary.totalMonthlyMarkup + breakdown.monthlyMarkupAmount);
+      summary.totalAnnualMarkup = round(summary.totalAnnualMarkup + breakdown.annualMarkupAmount);
+      summary.totalAdvanceInstallments = round(
+        summary.totalAdvanceInstallments + breakdown.advanceInstallmentAmount,
+      );
+      summary.totalCollected = round(summary.totalCollected + breakdown.totalAmount);
       enrolledEmployees.add(payroll.employeeId);
-      if (scaleCode) usedScales.add(scaleCode);
+      if (breakdown.scaleCode) usedScales.add(breakdown.scaleCode);
 
       const monthKey = `${payroll.year}-${payroll.month}`;
       const monthEntry = monthMap.get(monthKey) ?? {
@@ -95,36 +128,54 @@ export class GpFundOverviewService {
         label: `${MONTH_NAMES[payroll.month - 1]} ${payroll.year}`,
         payrollCount: 0,
         employeeCount: new Set<number>(),
+        totalBaseCollected: 0,
+        totalMonthlyMarkup: 0,
+        totalAnnualMarkup: 0,
         totalCollected: 0,
       };
       monthEntry.payrollCount += 1;
       monthEntry.employeeCount.add(payroll.employeeId);
-      monthEntry.totalCollected = round(monthEntry.totalCollected + gpFundAmount);
+      monthEntry.totalBaseCollected = round(monthEntry.totalBaseCollected + breakdown.baseAmount);
+      monthEntry.totalMonthlyMarkup = round(monthEntry.totalMonthlyMarkup + breakdown.monthlyMarkupAmount);
+      monthEntry.totalAnnualMarkup = round(monthEntry.totalAnnualMarkup + breakdown.annualMarkupAmount);
+      monthEntry.totalCollected = round(monthEntry.totalCollected + breakdown.totalAmount);
       monthMap.set(monthKey, monthEntry);
 
       const yearEntry = yearMap.get(payroll.year) ?? {
         year: payroll.year,
         payrollCount: 0,
         employeeCount: new Set<number>(),
+        totalBaseCollected: 0,
+        totalMonthlyMarkup: 0,
+        totalAnnualMarkup: 0,
         totalCollected: 0,
       };
       yearEntry.payrollCount += 1;
       yearEntry.employeeCount.add(payroll.employeeId);
-      yearEntry.totalCollected = round(yearEntry.totalCollected + gpFundAmount);
+      yearEntry.totalBaseCollected = round(yearEntry.totalBaseCollected + breakdown.baseAmount);
+      yearEntry.totalMonthlyMarkup = round(yearEntry.totalMonthlyMarkup + breakdown.monthlyMarkupAmount);
+      yearEntry.totalAnnualMarkup = round(yearEntry.totalAnnualMarkup + breakdown.annualMarkupAmount);
+      yearEntry.totalCollected = round(yearEntry.totalCollected + breakdown.totalAmount);
       yearMap.set(payroll.year, yearEntry);
 
-      if (scaleCode) {
-        const scaleEntry = scaleUsageMap.get(scaleCode) ?? {
-          scaleCode,
-          subscriptionValue,
+      if (breakdown.scaleCode) {
+        const scaleEntry = scaleUsageMap.get(breakdown.scaleCode) ?? {
+          scaleCode: breakdown.scaleCode,
+          subscriptionValue: breakdown.subscriptionValue,
           payrollCount: 0,
           employeeCount: new Set<number>(),
+          totalBaseCollected: 0,
+          totalMonthlyMarkup: 0,
+          totalAnnualMarkup: 0,
           totalCollected: 0,
         };
         scaleEntry.payrollCount += 1;
         scaleEntry.employeeCount.add(payroll.employeeId);
-        scaleEntry.totalCollected = round(scaleEntry.totalCollected + gpFundAmount);
-        scaleUsageMap.set(scaleCode, scaleEntry);
+        scaleEntry.totalBaseCollected = round(scaleEntry.totalBaseCollected + breakdown.baseAmount);
+        scaleEntry.totalMonthlyMarkup = round(scaleEntry.totalMonthlyMarkup + breakdown.monthlyMarkupAmount);
+        scaleEntry.totalAnnualMarkup = round(scaleEntry.totalAnnualMarkup + breakdown.annualMarkupAmount);
+        scaleEntry.totalCollected = round(scaleEntry.totalCollected + breakdown.totalAmount);
+        scaleUsageMap.set(breakdown.scaleCode, scaleEntry);
       }
 
       if (employee) {
@@ -133,13 +184,19 @@ export class GpFundOverviewService {
           employeeCode: employee.employeeCode,
           name: employee.name,
           designation: employee.designation,
-          gpFundScale: scaleCode,
-          subscriptionValue,
+          gpFundScale: breakdown.scaleCode,
+          subscriptionValue: breakdown.subscriptionValue,
           payrollCount: 0,
+          totalBaseCollected: 0,
+          totalMonthlyMarkup: 0,
+          totalAnnualMarkup: 0,
           totalCollected: 0,
         };
         empEntry.payrollCount += 1;
-        empEntry.totalCollected = round(empEntry.totalCollected + gpFundAmount);
+        empEntry.totalBaseCollected = round(empEntry.totalBaseCollected + breakdown.baseAmount);
+        empEntry.totalMonthlyMarkup = round(empEntry.totalMonthlyMarkup + breakdown.monthlyMarkupAmount);
+        empEntry.totalAnnualMarkup = round(empEntry.totalAnnualMarkup + breakdown.annualMarkupAmount);
+        empEntry.totalCollected = round(empEntry.totalCollected + breakdown.totalAmount);
         employeeMap.set(payroll.employeeId, empEntry);
       }
     }
@@ -158,6 +215,9 @@ export class GpFundOverviewService {
         label: entry.label,
         payrollCount: entry.payrollCount,
         employeeCount: entry.employeeCount.size,
+        totalBaseCollected: entry.totalBaseCollected,
+        totalMonthlyMarkup: entry.totalMonthlyMarkup,
+        totalAnnualMarkup: entry.totalAnnualMarkup,
         totalCollected: entry.totalCollected,
       }))
       .sort((a, b) => (a.year === b.year ? a.month - b.month : a.year - b.year));
@@ -167,6 +227,9 @@ export class GpFundOverviewService {
         year: entry.year,
         payrollCount: entry.payrollCount,
         employeeCount: entry.employeeCount.size,
+        totalBaseCollected: entry.totalBaseCollected,
+        totalMonthlyMarkup: entry.totalMonthlyMarkup,
+        totalAnnualMarkup: entry.totalAnnualMarkup,
         totalCollected: entry.totalCollected,
       }))
       .sort((a, b) => a.year - b.year);
@@ -177,6 +240,9 @@ export class GpFundOverviewService {
         subscriptionValue: entry.subscriptionValue,
         payrollCount: entry.payrollCount,
         employeeCount: entry.employeeCount.size,
+        totalBaseCollected: entry.totalBaseCollected,
+        totalMonthlyMarkup: entry.totalMonthlyMarkup,
+        totalAnnualMarkup: entry.totalAnnualMarkup,
         totalCollected: entry.totalCollected,
       }))
       .sort((a, b) => b.totalCollected - a.totalCollected);
@@ -188,8 +254,11 @@ export class GpFundOverviewService {
     const records = payrolls
       .map((payroll) => {
         const employee = payroll.employee;
-        const { scaleCode, subscriptionValue, amount: gpFundAmount } =
-          this.resolvePayrollGpFund(payroll, scaleMap);
+        const breakdown = resolvePayrollGpFundDeductions(
+          payroll.deductions,
+          employee,
+          scaleMap,
+        );
 
         return {
           payrollId: payroll.id,
@@ -200,13 +269,19 @@ export class GpFundOverviewService {
           month: payroll.month,
           year: payroll.year,
           label: `${MONTH_NAMES[payroll.month - 1]} ${payroll.year}`,
-          gpFundScale: scaleCode,
-          subscriptionValue,
-          gpFundAmount,
+          gpFundScale: breakdown.scaleCode,
+          subscriptionValue: breakdown.subscriptionValue,
+          gpFundBaseAmount: breakdown.baseAmount,
+          monthlyMarkupAmount: breakdown.monthlyMarkupAmount,
+          annualMarkupAmount: breakdown.annualMarkupAmount,
+          advanceInstallmentAmount: breakdown.advanceInstallmentAmount,
+          gpFundAmount: breakdown.totalAmount,
           grossSalary: Number(payroll.grossSalary),
         };
       })
       .filter((row) => row.gpFundAmount > 0);
+
+    const advances = await this.gpFundAdvanceService.getSummary();
 
     return {
       summary,
@@ -215,6 +290,7 @@ export class GpFundOverviewService {
       byScale,
       byEmployee,
       records,
+      advances,
       availableYears,
       filters: {
         employeeId: query.employeeId ?? null,
@@ -230,6 +306,13 @@ export class GpFundOverviewService {
 
     return {
       totalCollected: overview.summary.totalCollected,
+      totalBaseCollected: overview.summary.totalBaseCollected,
+      totalMonthlyMarkup: overview.summary.totalMonthlyMarkup,
+      totalAnnualMarkup: overview.summary.totalAnnualMarkup,
+      totalAdvanceInstallments: overview.summary.totalAdvanceInstallments,
+      monthlyMarkupRate: overview.summary.monthlyMarkupRate,
+      annualMarkupRate: overview.summary.annualMarkupRate,
+      advances: overview.advances,
       enrolledEmployees: overview.summary.enrolledEmployeeCount,
       contributingRecords: overview.summary.payrollCount,
       avgMonthlyContribution: overview.summary.avgMonthlyContribution,
@@ -245,41 +328,6 @@ export class GpFundOverviewService {
       map.set(scale.code.toUpperCase(), Number(scale.value));
     }
     return map;
-  }
-
-  private resolvePayrollGpFund(
-    payroll: Payroll,
-    scaleMap: Map<string, number>,
-  ): { scaleCode: string | null; subscriptionValue: number; amount: number } {
-    const gpFundDeduction = payroll.deductions?.find(
-      (deduction) => deduction.code === GP_FUND_DEDUCTION_CODE,
-    );
-
-    if (gpFundDeduction) {
-      const amount = Number(gpFundDeduction.amount);
-      const subscriptionValue = gpFundDeduction.appliedFixedAmount != null
-        ? Number(gpFundDeduction.appliedFixedAmount)
-        : amount;
-      const scaleCode = payroll.employee?.gpFund?.trim().toUpperCase()
-        ?? this.extractScaleFromDeductionName(gpFundDeduction.name);
-
-      return {
-        scaleCode,
-        subscriptionValue,
-        amount,
-      };
-    }
-
-    if (!payroll.employee) {
-      return { scaleCode: null, subscriptionValue: 0, amount: 0 };
-    }
-
-    return resolveGpFundAmount(payroll.employee, scaleMap);
-  }
-
-  private extractScaleFromDeductionName(name: string): string | null {
-    const match = name.match(/GP Fund \(([^)]+)\)/i);
-    return match?.[1]?.trim().toUpperCase() ?? null;
   }
 
   private buildPayrollQuery(query: GpFundOverviewQueryDto) {
