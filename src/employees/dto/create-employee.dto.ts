@@ -292,6 +292,21 @@ export class CreateEmployeeDto {
   accountNumber?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  nomineeName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  nomineeRelation?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  gpfAccountNumber?: string;
+
+  @IsOptional()
   @IsEnum(EmployeeStatus)
   status?: EmployeeStatus;
 }

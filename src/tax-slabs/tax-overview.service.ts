@@ -1,3 +1,4 @@
+import { roundAmount } from '../common/utils/currency.utils';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -14,10 +15,6 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-function round(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
 function isTaxDeduction(deduction: PayrollDeduction): boolean {
   if (deduction.code === GP_FUND_DEDUCTION_CODE) return false;
   if (deduction.category === DeductionCategory.GP_FUND) return false;
@@ -28,7 +25,7 @@ function isTaxDeduction(deduction: PayrollDeduction): boolean {
 }
 
 function summarizePayrollTaxes(payroll: Payroll) {
-  const gross = Number(payroll.grossSalary);
+  const gross = roundAmount(payroll.grossSalary);
   const taxDeductions = (payroll.deductions ?? []).filter(isTaxDeduction);
 
   if (taxDeductions.length > 0) {
@@ -38,33 +35,33 @@ function summarizePayrollTaxes(payroll: Payroll) {
     for (const deduction of taxDeductions) {
       const amount = Number(deduction.amount);
       if (deduction.category === DeductionCategory.INCOME_TAX) {
-        incomeTax = round(incomeTax + amount);
+        incomeTax = roundAmount(incomeTax + amount);
       } else {
-        subTaxes = round(subTaxes + amount);
+        subTaxes = roundAmount(subTaxes + amount);
       }
     }
 
-    const totalDeductions = round(incomeTax + subTaxes);
+    const totalDeductions = roundAmount(incomeTax + subTaxes);
     return {
       gross,
       incomeTax,
       subTaxes,
       totalDeductions,
-      netSalary: round(gross - totalDeductions),
+      netSalary: roundAmount(gross - totalDeductions),
     };
   }
 
   // Legacy payrolls without deduction rows — totalDeductions was tax-only before GP Fund existed
   const incomeTax = Number(payroll.incomeTax);
   const totalDeductions = Number(payroll.totalDeductions);
-  const subTaxes = round(totalDeductions - incomeTax);
+  const subTaxes = roundAmount(totalDeductions - incomeTax);
 
   return {
     gross,
     incomeTax,
     subTaxes,
     totalDeductions,
-    netSalary: Number(payroll.netSalary),
+    netSalary: roundAmount(payroll.netSalary),
   };
 }
 
@@ -151,11 +148,11 @@ export class TaxOverviewService {
         netSalary: net,
       } = summarizePayrollTaxes(payroll);
 
-      summary.totalGross = round(summary.totalGross + gross);
-      summary.totalIncomeTax = round(summary.totalIncomeTax + incomeTax);
-      summary.totalSubTaxes = round(summary.totalSubTaxes + subTaxes);
-      summary.totalDeductions = round(summary.totalDeductions + totalDeductions);
-      summary.totalNet = round(summary.totalNet + net);
+      summary.totalGross = roundAmount(summary.totalGross + gross);
+      summary.totalIncomeTax = roundAmount(summary.totalIncomeTax + incomeTax);
+      summary.totalSubTaxes = roundAmount(summary.totalSubTaxes + subTaxes);
+      summary.totalDeductions = roundAmount(summary.totalDeductions + totalDeductions);
+      summary.totalNet = roundAmount(summary.totalNet + net);
 
       const monthKey = `${payroll.year}-${payroll.month}`;
       const monthEntry = monthMap.get(monthKey) ?? {
@@ -172,11 +169,11 @@ export class TaxOverviewService {
       };
       monthEntry.payrollCount += 1;
       monthEntry.employeeCount.add(payroll.employeeId);
-      monthEntry.totalGross = round(monthEntry.totalGross + gross);
-      monthEntry.totalIncomeTax = round(monthEntry.totalIncomeTax + incomeTax);
-      monthEntry.totalSubTaxes = round(monthEntry.totalSubTaxes + subTaxes);
-      monthEntry.totalDeductions = round(monthEntry.totalDeductions + totalDeductions);
-      monthEntry.totalNet = round(monthEntry.totalNet + net);
+      monthEntry.totalGross = roundAmount(monthEntry.totalGross + gross);
+      monthEntry.totalIncomeTax = roundAmount(monthEntry.totalIncomeTax + incomeTax);
+      monthEntry.totalSubTaxes = roundAmount(monthEntry.totalSubTaxes + subTaxes);
+      monthEntry.totalDeductions = roundAmount(monthEntry.totalDeductions + totalDeductions);
+      monthEntry.totalNet = roundAmount(monthEntry.totalNet + net);
       monthMap.set(monthKey, monthEntry);
 
       const yearEntry = yearMap.get(payroll.year) ?? {
@@ -191,11 +188,11 @@ export class TaxOverviewService {
       };
       yearEntry.payrollCount += 1;
       yearEntry.employeeCount.add(payroll.employeeId);
-      yearEntry.totalGross = round(yearEntry.totalGross + gross);
-      yearEntry.totalIncomeTax = round(yearEntry.totalIncomeTax + incomeTax);
-      yearEntry.totalSubTaxes = round(yearEntry.totalSubTaxes + subTaxes);
-      yearEntry.totalDeductions = round(yearEntry.totalDeductions + totalDeductions);
-      yearEntry.totalNet = round(yearEntry.totalNet + net);
+      yearEntry.totalGross = roundAmount(yearEntry.totalGross + gross);
+      yearEntry.totalIncomeTax = roundAmount(yearEntry.totalIncomeTax + incomeTax);
+      yearEntry.totalSubTaxes = roundAmount(yearEntry.totalSubTaxes + subTaxes);
+      yearEntry.totalDeductions = roundAmount(yearEntry.totalDeductions + totalDeductions);
+      yearEntry.totalNet = roundAmount(yearEntry.totalNet + net);
       yearMap.set(payroll.year, yearEntry);
 
       const slabName = payroll.taxSlabName ?? 'No applicable slab';
@@ -209,9 +206,9 @@ export class TaxOverviewService {
         totalDeductions: 0,
       };
       slabEntry.payrollCount += 1;
-      slabEntry.totalIncomeTax = round(slabEntry.totalIncomeTax + incomeTax);
-      slabEntry.totalSubTaxes = round(slabEntry.totalSubTaxes + subTaxes);
-      slabEntry.totalDeductions = round(slabEntry.totalDeductions + totalDeductions);
+      slabEntry.totalIncomeTax = roundAmount(slabEntry.totalIncomeTax + incomeTax);
+      slabEntry.totalSubTaxes = roundAmount(slabEntry.totalSubTaxes + subTaxes);
+      slabEntry.totalDeductions = roundAmount(slabEntry.totalDeductions + totalDeductions);
       slabMap.set(slabKey, slabEntry);
 
       if (payroll.employee) {
@@ -227,10 +224,10 @@ export class TaxOverviewService {
           totalGross: 0,
         };
         empEntry.payrollCount += 1;
-        empEntry.totalIncomeTax = round(empEntry.totalIncomeTax + incomeTax);
-        empEntry.totalSubTaxes = round(empEntry.totalSubTaxes + subTaxes);
-        empEntry.totalDeductions = round(empEntry.totalDeductions + totalDeductions);
-        empEntry.totalGross = round(empEntry.totalGross + gross);
+        empEntry.totalIncomeTax = roundAmount(empEntry.totalIncomeTax + incomeTax);
+        empEntry.totalSubTaxes = roundAmount(empEntry.totalSubTaxes + subTaxes);
+        empEntry.totalDeductions = roundAmount(empEntry.totalDeductions + totalDeductions);
+        empEntry.totalGross = roundAmount(empEntry.totalGross + gross);
         employeeMap.set(payroll.employeeId, empEntry);
       }
 
@@ -245,7 +242,7 @@ export class TaxOverviewService {
           amount: 0,
           count: 0,
         };
-        dedEntry.amount = round(dedEntry.amount + Number(deduction.amount));
+        dedEntry.amount = roundAmount(dedEntry.amount + Number(deduction.amount));
         dedEntry.count += 1;
         deductionMap.set(dedKey, dedEntry);
       }

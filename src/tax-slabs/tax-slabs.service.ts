@@ -1,3 +1,4 @@
+import { roundAmount } from '../common/utils/currency.utils';
 import {
   BadRequestException,
   ConflictException,
@@ -244,15 +245,15 @@ export class TaxSlabsService {
   }
 
   async calculateTaxes(monthlyGrossSalary: number): Promise<TaxCalculationResult> {
-    const annualIncome = this.round(monthlyGrossSalary * MONTHS_PER_TAX_YEAR);
+    const annualIncome = roundAmount(monthlyGrossSalary * MONTHS_PER_TAX_YEAR);
     const taxSlab = await this.findApplicableTaxSlab(annualIncome);
     const { percentage: percentageAnnual, fixed: fixedAnnual } = taxSlab
       ? this.calculateAnnualIncomeTaxComponents(annualIncome, taxSlab)
       : { percentage: 0, fixed: 0 };
-    const annualIncomeTax = this.round(percentageAnnual + fixedAnnual);
-    const percentageMonthly = this.round(percentageAnnual / MONTHS_PER_TAX_YEAR);
-    const fixedMonthly = this.round(fixedAnnual / MONTHS_PER_TAX_YEAR);
-    const incomeTax = this.round(percentageMonthly + fixedMonthly);
+    const annualIncomeTax = roundAmount(percentageAnnual + fixedAnnual);
+    const percentageMonthly = roundAmount(percentageAnnual / MONTHS_PER_TAX_YEAR);
+    const fixedMonthly = roundAmount(fixedAnnual / MONTHS_PER_TAX_YEAR);
+    const incomeTax = roundAmount(percentageMonthly + fixedMonthly);
 
     const activeSubTaxes =
       taxSlab?.subTaxes?.filter((st) => st.isActive) ?? [];
@@ -266,8 +267,8 @@ export class TaxSlabsService {
       (sum, item) => sum + item.amount,
       0,
     );
-    const totalDeductions = this.round(incomeTax + subTaxTotal);
-    const netSalary = this.round(monthlyGrossSalary - totalDeductions);
+    const totalDeductions = roundAmount(incomeTax + subTaxTotal);
+    const netSalary = roundAmount(monthlyGrossSalary - totalDeductions);
 
     return {
       taxSlab,
@@ -297,11 +298,11 @@ export class TaxSlabsService {
       const minSalary = Number(taxSlab.minSalary);
       const exemptionThreshold = minSalary > 0 ? minSalary - 1 : 0;
       const taxableExcess = Math.max(0, annualIncome - exemptionThreshold);
-      percentage = this.round((taxableExcess * Number(taxSlab.taxRate)) / 100);
+      percentage = roundAmount((taxableExcess * Number(taxSlab.taxRate)) / 100);
     }
 
     if (taxSlab.fixedTaxAmount != null && Number(taxSlab.fixedTaxAmount) > 0) {
-      fixed = this.round(Number(taxSlab.fixedTaxAmount));
+      fixed = roundAmount(Number(taxSlab.fixedTaxAmount));
     }
 
     return { percentage, fixed };
@@ -360,9 +361,9 @@ export class TaxSlabsService {
 
   private calculateSubTaxAmount(subTax: SubTax, grossSalary: number): number {
     if (subTax.type === SubTaxType.PERCENTAGE) {
-      return this.round((grossSalary * Number(subTax.rate)) / 100);
+      return roundAmount((grossSalary * Number(subTax.rate)) / 100);
     }
-    return this.round(Number(subTax.amount));
+    return roundAmount(Number(subTax.amount));
   }
 
   private validateSalaryRange(
@@ -387,9 +388,5 @@ export class TaxSlabsService {
         'Amount is required for fixed sub-taxes',
       );
     }
-  }
-
-  private round(value: number): number {
-    return Math.round(value * 100) / 100;
   }
 }

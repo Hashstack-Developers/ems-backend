@@ -1,4 +1,5 @@
 import { Employee } from '../employees/entities/employee.entity';
+import { roundAmount } from '../common/utils/currency.utils';
 
 export const GP_FUND_DEDUCTION_CODE = 'GP_FUND';
 export const GP_FUND_MONTHLY_MARKUP_CODE = 'GP_FUND_MONTHLY_MARKUP';
@@ -28,10 +29,6 @@ export interface GpFundAmountBreakdown {
   totalAmount: number;
 }
 
-function roundCurrency(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
 export function resolveGpFundScaleCode(employee: Pick<Employee, 'gpFund'>): string | null {
   const code = employee.gpFund?.trim().toUpperCase();
   return code || null;
@@ -46,7 +43,7 @@ export function resolveGpFundAmount(
     return { scaleCode: null, subscriptionValue: 0, amount: 0 };
   }
 
-  const subscriptionValue = scaleMap.get(scaleCode) ?? 0;
+  const subscriptionValue = roundAmount(scaleMap.get(scaleCode) ?? 0);
   const amount = subscriptionValue > 0 ? subscriptionValue : 0;
 
   return { scaleCode, subscriptionValue, amount };
@@ -57,7 +54,7 @@ export function calculateMonthlyMarkupAmount(
   monthlyMarkupRate: number,
 ): number {
   if (baseAmount <= 0 || monthlyMarkupRate <= 0) return 0;
-  return roundCurrency(baseAmount * monthlyMarkupRate / 100);
+  return roundAmount(baseAmount * monthlyMarkupRate / 100);
 }
 
 export function calculateAnnualMarkupAmount(
@@ -65,7 +62,7 @@ export function calculateAnnualMarkupAmount(
   annualMarkupRate: number,
 ): number {
   if (yearSubtotal <= 0 || annualMarkupRate <= 0) return 0;
-  return roundCurrency(yearSubtotal * annualMarkupRate / 100);
+  return roundAmount(yearSubtotal * annualMarkupRate / 100);
 }
 
 export function buildGpFundBreakdown(
@@ -83,8 +80,8 @@ export function buildGpFundBreakdown(
     subscriptionValue: base.subscriptionValue,
     baseAmount: base.amount,
     monthlyMarkupAmount,
-    annualMarkupAmount: roundCurrency(annualMarkupAmount),
-    totalAmount: roundCurrency(base.amount + monthlyMarkupAmount + annualMarkupAmount),
+    annualMarkupAmount: roundAmount(annualMarkupAmount),
+    totalAmount: roundAmount(base.amount + monthlyMarkupAmount + annualMarkupAmount),
   };
 }
 
@@ -110,12 +107,12 @@ export function resolvePayrollGpFundDeductions(
   const advanceDeduction = deductions?.find((d) => d.code === GP_FUND_ADVANCE_CODE);
 
   if (baseDeduction || monthlyDeduction || annualDeduction || advanceDeduction) {
-    const baseAmount = baseDeduction ? Number(baseDeduction.amount) : 0;
-    const monthlyMarkupAmount = monthlyDeduction ? Number(monthlyDeduction.amount) : 0;
-    const annualMarkupAmount = annualDeduction ? Number(annualDeduction.amount) : 0;
-    const advanceInstallmentAmount = advanceDeduction ? Number(advanceDeduction.amount) : 0;
+    const baseAmount = roundAmount(baseDeduction ? baseDeduction.amount : 0);
+    const monthlyMarkupAmount = roundAmount(monthlyDeduction ? monthlyDeduction.amount : 0);
+    const annualMarkupAmount = roundAmount(annualDeduction ? annualDeduction.amount : 0);
+    const advanceInstallmentAmount = roundAmount(advanceDeduction ? advanceDeduction.amount : 0);
     const subscriptionValue = baseDeduction?.appliedFixedAmount != null
-      ? Number(baseDeduction.appliedFixedAmount)
+      ? roundAmount(baseDeduction.appliedFixedAmount)
       : baseAmount;
     const scaleCode = employee?.gpFund?.trim().toUpperCase()
       ?? extractScaleFromDeductionName(baseDeduction?.name ?? '');
@@ -125,7 +122,7 @@ export function resolvePayrollGpFundDeductions(
       monthlyMarkupAmount,
       annualMarkupAmount,
       advanceInstallmentAmount,
-      totalAmount: roundCurrency(
+      totalAmount: roundAmount(
         baseAmount + monthlyMarkupAmount + annualMarkupAmount + advanceInstallmentAmount,
       ),
       scaleCode,
@@ -147,11 +144,11 @@ export function resolvePayrollGpFundDeductions(
 
   const legacy = resolveGpFundAmount(employee, scaleMap);
   return {
-    baseAmount: legacy.amount,
+    baseAmount: roundAmount(legacy.amount),
     monthlyMarkupAmount: 0,
     annualMarkupAmount: 0,
     advanceInstallmentAmount: 0,
-    totalAmount: legacy.amount,
+    totalAmount: roundAmount(legacy.amount),
     scaleCode: legacy.scaleCode,
     subscriptionValue: legacy.subscriptionValue,
   };
@@ -162,14 +159,14 @@ export function calculateAdvanceMonthlyInstallment(
   installmentMonths: number,
 ): number {
   if (advanceAmount <= 0 || installmentMonths <= 0) return 0;
-  return roundCurrency(advanceAmount / installmentMonths);
+  return roundAmount(advanceAmount / installmentMonths);
 }
 
 export function getAdvanceRemainingBalance(advance: {
   advanceAmount: number;
   amountRepaid: number;
 }): number {
-  return roundCurrency(Math.max(0, Number(advance.advanceAmount) - Number(advance.amountRepaid)));
+  return roundAmount(Math.max(0, Number(advance.advanceAmount) - Number(advance.amountRepaid)));
 }
 
 export function calculateAdvanceInstallmentAmount(advance: {
@@ -179,7 +176,7 @@ export function calculateAdvanceInstallmentAmount(advance: {
 }): number {
   const remaining = getAdvanceRemainingBalance(advance);
   if (remaining <= 0) return 0;
-  return roundCurrency(Math.min(Number(advance.monthlyInstallment), remaining));
+  return roundAmount(Math.min(Number(advance.monthlyInstallment), remaining));
 }
 
 function extractScaleFromDeductionName(name: string): string | null {

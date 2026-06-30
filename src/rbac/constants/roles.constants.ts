@@ -58,6 +58,8 @@ const ADMIN_PERMISSIONS = [
   'gpFund.create',
   'gpFund.update',
   'gpFund.delete',
+  'gpFund.generate',
+  'gpFund.export',
   'reports.view',
   'reports.export',
   'settings.view',

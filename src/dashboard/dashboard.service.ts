@@ -1,13 +1,10 @@
+import { roundAmount } from '../common/utils/currency.utils';
 import { Injectable } from '@nestjs/common';
 import { EmployeesService } from '../employees/employees.service';
 import { GpFundOverviewService } from '../gp-fund/gp-fund-overview.service';
 import { PayrollsService } from '../payrolls/payrolls.service';
 import { TaxOverviewService } from '../tax-slabs/tax-overview.service';
 import { TaxSlabsService } from '../tax-slabs/tax-slabs.service';
-
-function round(value: number): number {
-  return Math.round(value * 100) / 100;
-}
 
 function monthKey(year: number, month: number): string {
   return `${year}-${month}`;
@@ -54,7 +51,7 @@ export class DashboardService {
 
     const totalTaxDeductions = taxCollection.totalCollected;
     const totalGpFund = gpFund.totalCollected;
-    const totalCombinedDeductions = round(totalTaxDeductions + totalGpFund);
+    const totalCombinedDeductions = roundAmount(totalTaxDeductions + totalGpFund);
 
     const taxByMonthMap = new Map(
       taxCollection.byMonth.map((row) => [monthKey(row.year, row.month), row]),
@@ -74,7 +71,7 @@ export class DashboardService {
         label: row.label,
         totalTaxes: taxRow?.totalDeductions ?? 0,
         totalGpFund: gpRow?.totalCollected ?? 0,
-        totalCombined: round((taxRow?.totalDeductions ?? 0) + (gpRow?.totalCollected ?? 0)),
+        totalCombined: roundAmount((taxRow?.totalDeductions ?? 0) + (gpRow?.totalCollected ?? 0)),
       };
     });
 
@@ -101,7 +98,10 @@ export class DashboardService {
       deductionsByMonth,
       payrollTotals: {
         monthsWithPayroll: payrollByMonth.length,
-        ...payrollTotals,
+        count: payrollTotals.count,
+        totalGross: roundAmount(payrollTotals.totalGross),
+        totalDeductions: roundAmount(payrollTotals.totalDeductions),
+        totalNet: roundAmount(payrollTotals.totalNet),
         totalTaxDeductions,
         totalGpFund,
         totalCombinedDeductions,

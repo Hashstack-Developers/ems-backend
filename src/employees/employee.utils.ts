@@ -1,4 +1,5 @@
 import { Employee } from './entities/employee.entity';
+import { roundAmount } from '../common/utils/currency.utils';
 
 export const STANDARD_PAYROLL_MONTH_DAYS = 30;
 export const EMPLOYEE_CODE_PREFIX = 'WCLA';
@@ -44,12 +45,8 @@ export interface PayrollGrossBreakdown {
   salaryDays: number | null;
 }
 
-function roundCurrency(amount: number): number {
-  return Math.round(amount * 100) / 100;
-}
-
 export function computePayrollGross(employee: Employee): PayrollGrossBreakdown {
-  const fullGross = getEmployeePayrollGross(employee);
+  const fullGross = roundAmount(getEmployeePayrollGross(employee));
   const daysRaw = employee.timePeriod?.trim();
 
   if (!daysRaw || !/^\d+$/.test(daysRaw)) {
@@ -67,7 +64,7 @@ export function computePayrollGross(employee: Employee): PayrollGrossBreakdown {
 
   return {
     fullGross,
-    payableGross: roundCurrency(fullGross * (salaryDays / STANDARD_PAYROLL_MONTH_DAYS)),
+    payableGross: roundAmount(fullGross * (salaryDays / STANDARD_PAYROLL_MONTH_DAYS)),
     salaryDays,
   };
 }

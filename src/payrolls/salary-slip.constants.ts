@@ -1,7 +1,8 @@
 /** Fixed bank details shown on every WCLA salary slip. */
 export const SALARY_SLIP_BANK = {
-  name: 'Bank of the Punjab',
-  branch: 'Queens Road, LHR',
+  name: 'The Bank of Punjab',
+  branch: 'Queens Road, Lahore',
+  branchCode: '214',
 } as const;
 
 export const SALARY_SLIP_LOGOS = {

@@ -1,5 +1,6 @@
 import { Employee } from '../employees/entities/employee.entity';
 import { getEmployeeFullName } from '../employees/employee.utils';
+import { parseAmount, roundAmount } from '../common/utils/currency.utils';
 import { GpFundAdvance } from '../gp-fund/entities/gp-fund-advance.entity';
 import { getAdvanceRemainingBalance } from '../gp-fund/gp-fund.utils';
 import {
@@ -100,16 +101,6 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-function num(value: number | string | null | undefined): number {
-  if (value == null || value === '') return 0;
-  const parsed = Number(value);
-  return Number.isNaN(parsed) ? 0 : parsed;
-}
-
-function round(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
 function formatDisplayDate(value: string | null | undefined): string {
   if (!value) return '—';
   const date = new Date(value);
@@ -163,39 +154,39 @@ function allowanceLine(
   label: string,
   amount: number | null | undefined,
 ): SalarySlipLineItem | null {
-  const value = num(amount);
+  const value = parseAmount(amount);
   if (value <= 0) return null;
-  return { label, amount: value };
+  return { label, amount: roundAmount(value) };
 }
 
 function buildAllowances(employee: Employee): SalarySlipLineItem[] {
   const lines = SALARY_SLIP_ALLOWANCE_FIELDS.map((field) => {
     const raw = field.getValue(employee);
-    const value = typeof raw === 'number' ? raw : num(raw);
+    const value = typeof raw === 'number' ? raw : parseAmount(raw);
     return allowanceLine(field.label, value);
   }).filter((line): line is SalarySlipLineItem => line != null);
 
-  if (lines.length === 0 && num(employee.grossSalary) > 0) {
-    lines.push({ label: 'Gross Salary', amount: num(employee.grossSalary) });
-  } else if (lines.length === 0 && num(employee.grossSalaryWithTaxes) > 0) {
-    lines.push({ label: 'Gross Salary with Taxes', amount: num(employee.grossSalaryWithTaxes) });
+  if (lines.length === 0 && parseAmount(employee.grossSalary) > 0) {
+    lines.push({ label: 'Gross Salary', amount: roundAmount(employee.grossSalary) });
+  } else if (lines.length === 0 && parseAmount(employee.grossSalaryWithTaxes) > 0) {
+    lines.push({ label: 'Gross Salary with Taxes', amount: roundAmount(employee.grossSalaryWithTaxes) });
   }
 
   return lines;
 }
 
 function sumLines(lines: SalarySlipLineItem[]): number {
-  return round(lines.reduce((sum, line) => sum + line.amount, 0));
+  return roundAmount(lines.reduce((sum, line) => sum + line.amount, 0));
 }
 
 function getDeductionAmount(
   deductions: PayrollDeduction[],
   codes: string[],
 ): number {
-  return round(
+  return roundAmount(
     deductions
       .filter((d) => codes.includes(d.code))
-      .reduce((sum, d) => sum + num(d.amount), 0),
+      .reduce((sum, d) => sum + parseAmount(d.amount), 0),
   );
 }
 
@@ -205,14 +196,14 @@ function buildDeductions(
   employee: Employee,
 ): SalarySlipLineItem[] {
   const incomeTax = getDeductionAmount(deductions, ['INCOME_TAX', 'INCOME_TAX_FIXED']);
-  const subTaxes = round(
+  const subTaxes = roundAmount(
     deductions
       .filter((d) => d.category === 'sub_tax')
-      .reduce((sum, d) => sum + num(d.amount), 0),
+      .reduce((sum, d) => sum + parseAmount(d.amount), 0),
   );
-  const totalTax = round(incomeTax + subTaxes);
+  const totalTax = roundAmount(incomeTax + subTaxes);
 
-  const gpFundTotal = round(
+  const gpFundTotal = roundAmount(
     getDeductionAmount(deductions, [
       GP_FUND_DEDUCTION_CODE,
       GP_FUND_MONTHLY_MARKUP_CODE,
@@ -220,8 +211,8 @@ function buildDeductions(
     ]),
   );
 
-  const loanAdvance = round(
-    num(employee.loanAdvance) + getDeductionAmount(deductions, [GP_FUND_ADVANCE_CODE]),
+  const loanAdvance = roundAmount(
+    parseAmount(employee.loanAdvance) + getDeductionAmount(deductions, [GP_FUND_ADVANCE_CODE]),
   );
 
   const lines: SalarySlipLineItem[] = [
@@ -230,11 +221,11 @@ function buildDeductions(
     { label: SALARY_SLIP_DEDUCTION_LABELS.loanAdvance, amount: loanAdvance },
   ];
 
-  const otherDeduction = num(employee.deduction);
-  const tracked = round(sumLines(lines) + otherDeduction);
-  const payrollDeductions = num(payroll.totalDeductions);
-  const remainder = round(payrollDeductions - tracked);
-  const otherTotal = round(otherDeduction + Math.max(0, remainder));
+  const otherDeduction = parseAmount(employee.deduction);
+  const tracked = roundAmount(sumLines(lines) + otherDeduction);
+  const payrollDeductions = parseAmount(payroll.totalDeductions);
+  const remainder = roundAmount(payrollDeductions - tracked);
+  const otherTotal = roundAmount(otherDeduction + Math.max(0, remainder));
 
   lines.push({ label: SALARY_SLIP_DEDUCTION_LABELS.other, amount: otherTotal });
 
@@ -243,8 +234,8 @@ function buildDeductions(
 
 function buildLoanRecovery(advance: GpFundAdvance | null): SalarySlipRecoverySection | null {
   if (!advance) return null;
-  const payable = num(advance.advanceAmount);
-  const recoveredTill = num(advance.amountRepaid);
+  const payable = roundAmount(advance.advanceAmount);
+  const recoveredTill = roundAmount(advance.amountRepaid);
   const recoverable = getAdvanceRemainingBalance(advance);
   if (payable <= 0 && recoveredTill <= 0 && recoverable <= 0) return null;
 
@@ -257,9 +248,9 @@ function buildLoanRecovery(advance: GpFundAdvance | null): SalarySlipRecoverySec
 }
 
 function buildTaxRecovery(employee: Employee): SalarySlipRecoverySection | null {
-  const payable = num(employee.annualIncomeTax202526);
-  const recoveredTill = num(employee.totalDeductedIncomeTax202526);
-  const recoverable = round(Math.max(0, payable - recoveredTill));
+  const payable = roundAmount(employee.annualIncomeTax202526);
+  const recoveredTill = roundAmount(employee.totalDeductedIncomeTax202526);
+  const recoverable = roundAmount(Math.max(0, payable - recoveredTill));
   if (payable <= 0 && recoveredTill <= 0) return null;
 
   return {
@@ -279,7 +270,7 @@ export function buildSalarySlipPayload(
   const deductions = payroll.deductions ?? [];
   const allowances = buildAllowances(emp);
   const allowanceTotal = sumLines(allowances);
-  const grossDisplay = allowanceTotal > 0 ? allowanceTotal : num(payroll.grossSalary);
+  const grossDisplay = allowanceTotal > 0 ? allowanceTotal : roundAmount(payroll.grossSalary);
 
   const employee = {
     id: emp.id,
@@ -323,8 +314,8 @@ export function buildSalarySlipPayload(
     loanRecovery: buildLoanRecovery(advance),
     taxRecovery: buildTaxRecovery(emp),
     earnings: {
-      basicSalary: num(payroll.basicSalary),
-      grossSalary: num(payroll.grossSalary),
+      basicSalary: roundAmount(payroll.basicSalary),
+      grossSalary: roundAmount(payroll.grossSalary),
       salaryDays: payroll.salaryDays,
     },
     rawDeductions: deductions.map((d) => ({
@@ -334,13 +325,13 @@ export function buildSalarySlipPayload(
       calculationType: d.calculationType,
       appliedRate: d.appliedRate != null ? Number(d.appliedRate) : null,
       appliedFixedAmount: d.appliedFixedAmount != null ? Number(d.appliedFixedAmount) : null,
-      amount: num(d.amount),
+      amount: roundAmount(d.amount),
     })),
     summary: {
       grossSalary: grossDisplay,
-      totalDeductions: num(payroll.totalDeductions),
-      netSalary: num(payroll.netSalary),
-      incomeTax: num(payroll.incomeTax),
+      totalDeductions: roundAmount(payroll.totalDeductions),
+      netSalary: roundAmount(payroll.netSalary),
+      incomeTax: roundAmount(payroll.incomeTax),
       taxSlabName: payroll.taxSlabName,
       appliedTaxRate: payroll.appliedTaxRate != null ? Number(payroll.appliedTaxRate) : null,
     },

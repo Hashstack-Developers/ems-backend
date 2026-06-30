@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -8,13 +9,17 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RequirePermissions } from '../rbac/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../rbac/guards/permissions.guard';
 import { CreateGpFundScaleDto } from './dto/create-gp-fund-scale.dto';
 import { CreateGpFundRecordDto } from './dto/create-gp-fund-record.dto';
+import { DownloadGpFundReportsZipDto } from './dto/download-gp-fund-reports-zip.dto';
+import { GenerateGpFundReportDto } from './dto/generate-gp-fund-report.dto';
 import { GpFundOverviewQueryDto } from './dto/gp-fund-overview-query.dto';
 import { UpdateGpFundScaleDto } from './dto/update-gp-fund-scale.dto';
 import { UpdateGpFundMarkupDto } from './dto/update-gp-fund-markup.dto';
@@ -23,6 +28,7 @@ import { CreateGpFundAdvanceDto } from './dto/create-gp-fund-advance.dto';
 import { GpFundAdvanceQueryDto } from './dto/gp-fund-advance-query.dto';
 import { GpFundOverviewService } from './gp-fund-overview.service';
 import { GpFundAdvanceService } from './gp-fund-advance.service';
+import { GpFundReportsService } from './gp-fund-reports.service';
 import { GpFundService } from './gp-fund.service';
 
 @Controller('gp-fund')
@@ -32,6 +38,7 @@ export class GpFundController {
     private readonly gpFundService: GpFundService,
     private readonly gpFundAdvanceService: GpFundAdvanceService,
     private readonly gpFundOverviewService: GpFundOverviewService,
+    private readonly gpFundReportsService: GpFundReportsService,
   ) {}
 
   @Get()
@@ -129,6 +136,78 @@ export class GpFundController {
   async getOverview(@Query() query: GpFundOverviewQueryDto) {
     const data = await this.gpFundOverviewService.getOverview(query);
     return { success: true, data };
+  }
+
+  @Get('reports')
+  @RequirePermissions('gpFund.view')
+  async getReportAvailability(@Query() query: GpFundOverviewQueryDto) {
+    const data = await this.gpFundReportsService.getAvailability(query);
+    return { success: true, data };
+  }
+
+  @Post('reports/generate')
+  @RequirePermissions('gpFund.generate')
+  async generateReport(@Body() dto: GenerateGpFundReportDto) {
+    const data = await this.gpFundReportsService.generate(dto);
+    return { success: true, data };
+  }
+
+  @Post('reports/download/zip')
+  @RequirePermissions('gpFund.export')
+  async downloadReportsZip(@Body() dto: DownloadGpFundReportsZipDto, @Res() res: Response) {
+    const employees = await this.gpFundReportsService.resolveDownloadEmployees(dto);
+    const selected = !!(dto.employeeIds && dto.employeeIds.length > 0);
+    const filename = this.gpFundReportsService.buildZipFilename(dto, selected);
+    const archive = this.gpFundReportsService.createZipArchive();
+    const { added, failures } = await this.gpFundReportsService.appendEmployeesToArchive(
+      archive,
+      employees,
+      { years: dto.years, months: dto.months },
+    );
+
+    if (added === 0) {
+      throw new BadRequestException(
+        failures[0] ?? 'No GP fund reports could be generated for download',
+      );
+    }
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader(
+      'X-Download-Summary',
+      JSON.stringify({
+        added,
+        failed: failures.length,
+        messages: failures,
+      }),
+    );
+
+    archive.on('error', (error) => {
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: error.message,
+        });
+        return;
+      }
+      res.end();
+    });
+
+    archive.pipe(res);
+    await archive.finalize();
+  }
+
+  @Get('reports/:employeeId/pdf')
+  @RequirePermissions('gpFund.export')
+  async downloadReportPdf(
+    @Param('employeeId', ParseIntPipe) employeeId: number,
+    @Query() query: GpFundOverviewQueryDto,
+    @Res() res: Response,
+  ) {
+    const result = await this.gpFundReportsService.generatePdf(employeeId, query);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    res.send(result.buffer);
   }
 
   @Get(':id')

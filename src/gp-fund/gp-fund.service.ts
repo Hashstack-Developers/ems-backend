@@ -1,3 +1,4 @@
+import { roundAmount } from '../common/utils/currency.utils';
 import {
   BadRequestException,
   ConflictException,
@@ -145,7 +146,7 @@ export class GpFundService {
         base.amount,
         markupRates.monthlyMarkupRate,
       );
-      const yearSubtotal = this.round(
+      const yearSubtotal = roundAmount(
         ytd.baseTotal + ytd.monthlyMarkupTotal + base.amount + monthlyMarkupAmount,
       );
       annualMarkupAmount = calculateAnnualMarkupAmount(
@@ -182,8 +183,8 @@ export class GpFundService {
     }
 
     return {
-      baseTotal: this.round(baseTotal),
-      monthlyMarkupTotal: this.round(monthlyMarkupTotal),
+      baseTotal: roundAmount(baseTotal),
+      monthlyMarkupTotal: roundAmount(monthlyMarkupTotal),
     };
   }
 
@@ -307,7 +308,7 @@ export class GpFundService {
 
     return {
       year,
-      suggestedAmount: this.round(suggestedAmount),
+      suggestedAmount: roundAmount(suggestedAmount),
       payrollCount: payrolls.length,
       source: 'Sum of total payroll deductions for the year',
     };
@@ -328,7 +329,7 @@ export class GpFundService {
       const opening = i === 0 ? 0 : previousClosing;
       const collection = Number(record.yearlyTaxCollection);
       const markup = Number(record.markupTaxAmount ?? 0);
-      const closing = this.round(opening + collection + markup);
+      const closing = roundAmount(opening + collection + markup);
 
       record.openingBalance = opening;
       record.closingBalance = closing;
@@ -338,10 +339,6 @@ export class GpFundService {
     }
 
     return this.gpFundRepository.find({ order: { year: 'ASC' } });
-  }
-
-  private round(value: number): number {
-    return Math.round(value * 100) / 100;
   }
 
   private async ensureDefaultScales(): Promise<void> {

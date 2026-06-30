@@ -68,6 +68,9 @@ const OPTIONAL_STRING_FIELDS = [
   'stage',
   'timePeriod',
   'accountNumber',
+  'nomineeName',
+  'nomineeRelation',
+  'gpfAccountNumber',
 ] as const;
 
 @Injectable()

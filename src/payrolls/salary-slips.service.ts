@@ -1,3 +1,4 @@
+import { formatAmount } from '../common/utils/currency.utils';
 import {
   BadRequestException,
   Injectable,
@@ -253,13 +254,6 @@ export class SalarySlipsService {
     }
   }
 
-  private formatAmount(value: number): string {
-    return value.toLocaleString('en-PK', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    });
-  }
-
   private getSalarySlipLogoPath(filename: string): string {
     return path.join(__dirname, '..', 'assets', 'salary-slip', filename);
   }
@@ -267,7 +261,7 @@ export class SalarySlipsService {
   private formatDeductionAmount(item: SalarySlipLineItem | undefined): string {
     if (!item) return '';
     if (item.label === 'Other' && item.amount <= 0) return '';
-    return this.formatAmount(item.amount);
+    return formatAmount(item.amount);
   }
 
   private drawPayDeductionTableRow(
@@ -386,7 +380,7 @@ export class SalarySlipsService {
             rowHeight,
             [
               allowance?.label ?? '',
-              allowance ? this.formatAmount(allowance.amount) : '',
+              allowance ? formatAmount(allowance.amount) : '',
               deduction?.label ?? '',
               this.formatDeductionAmount(deduction),
             ],
@@ -402,9 +396,9 @@ export class SalarySlipsService {
         const summaryCols = pageWidth / 3;
         doc.rect(left, summaryY, pageWidth, rowHeight).stroke();
         doc.font('Helvetica-Bold').fontSize(9)
-          .text(`Gross Salary: ${this.formatAmount(slip.summary.grossSalary)}`, left + 4, summaryY + 4, { width: summaryCols - 8 })
-          .text(`Deduction: ${this.formatAmount(slip.summary.totalDeductions)}`, left + summaryCols + 4, summaryY + 4, { width: summaryCols - 8, align: 'center' })
-          .text(`Net Pay: ${this.formatAmount(slip.summary.netSalary)}`, left + summaryCols * 2 + 4, summaryY + 4, { width: summaryCols - 8, align: 'right' });
+          .text(`Gross Salary: ${formatAmount(slip.summary.grossSalary)}`, left + 4, summaryY + 4, { width: summaryCols - 8 })
+          .text(`Deduction: ${formatAmount(slip.summary.totalDeductions)}`, left + summaryCols + 4, summaryY + 4, { width: summaryCols - 8, align: 'center' })
+          .text(`Net Pay: ${formatAmount(slip.summary.netSalary)}`, left + summaryCols * 2 + 4, summaryY + 4, { width: summaryCols - 8, align: 'right' });
         doc.y = summaryY + rowHeight + 10;
 
         doc.font('Helvetica-Bold').fontSize(8).text('NOTE', left);
@@ -436,9 +430,9 @@ export class SalarySlipsService {
     const colW = pageWidth / 3;
     const labels = ['Payable', 'Recovered till', 'Recoverable'];
     const values = [
-      this.formatAmount(section.payable),
-      this.formatAmount(section.recoveredTill),
-      this.formatAmount(section.recoverable),
+      formatAmount(section.payable),
+      formatAmount(section.recoveredTill),
+      formatAmount(section.recoverable),
     ];
     const rowY = doc.y;
     labels.forEach((label, index) => {

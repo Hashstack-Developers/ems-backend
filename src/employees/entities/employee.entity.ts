@@ -217,6 +217,15 @@ export class Employee {
   @Column({ name: 'account_number', type: 'varchar', length: 50, nullable: true })
   accountNumber: string | null;
 
+  @Column({ name: 'nominee_name', type: 'varchar', length: 200, nullable: true })
+  nomineeName: string | null;
+
+  @Column({ name: 'nominee_relation', type: 'varchar', length: 100, nullable: true })
+  nomineeRelation: string | null;
+
+  @Column({ name: 'gpf_account_number', type: 'varchar', length: 50, nullable: true })
+  gpfAccountNumber: string | null;
+
   @Column({
     type: 'enum',
     enum: EmployeeStatus,

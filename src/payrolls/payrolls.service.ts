@@ -1,3 +1,4 @@
+import { roundAmount } from '../common/utils/currency.utils';
 import {
   BadRequestException,
   Injectable,
@@ -236,9 +237,9 @@ export class PayrollsService {
 
     return {
       count: payrolls.length,
-      totalGross: this.round(totalGross),
-      totalDeductions: this.round(totalDeductions),
-      totalNet: this.round(totalNet),
+      totalGross: roundAmount(totalGross),
+      totalDeductions: roundAmount(totalDeductions),
+      totalNet: roundAmount(totalNet),
     };
   }
 
@@ -277,9 +278,9 @@ export class PayrollsService {
         year,
         label: `${monthNames[month - 1]} ${year}`,
         count: parseInt(row.count, 10),
-        totalGross: this.round(Number(row.totalGross)),
-        totalDeductions: this.round(Number(row.totalDeductions)),
-        totalNet: this.round(Number(row.totalNet)),
+        totalGross: roundAmount(Number(row.totalGross)),
+        totalDeductions: roundAmount(Number(row.totalDeductions)),
+        totalNet: roundAmount(Number(row.totalNet)),
       };
     });
   }
@@ -368,20 +369,20 @@ export class PayrollsService {
     const advanceInstallment = await this.gpFundAdvanceService.resolveInstallmentForPayroll(
       employee.id,
     );
-    const totalGpFundDeductions = this.round(
+    const totalGpFundDeductions = roundAmount(
       gpFund.totalAmount + (advanceInstallment?.amount ?? 0),
     );
-    const totalDeductions = this.round(taxResult.totalDeductions + totalGpFundDeductions);
-    const netSalary = this.round(payableGross - totalDeductions);
+    const totalDeductions = roundAmount(taxResult.totalDeductions + totalGpFundDeductions);
+    const netSalary = roundAmount(payableGross - totalDeductions);
 
     const payroll = this.payrollsRepository.create({
       employeeId: employee.id,
       month,
       year,
-      basicSalary: fullGross,
-      grossSalary: payableGross,
+      basicSalary: roundAmount(fullGross),
+      grossSalary: roundAmount(payableGross),
       salaryDays,
-      incomeTax: taxResult.incomeTax,
+      incomeTax: roundAmount(taxResult.incomeTax),
       totalDeductions,
       netSalary,
       taxSlabId: taxResult.taxSlab?.id ?? null,
@@ -531,9 +532,5 @@ export class PayrollsService {
     if (year < 2000 || year > 2100) {
       throw new BadRequestException('Year must be between 2000 and 2100');
     }
-  }
-
-  private round(value: number): number {
-    return Math.round(value * 100) / 100;
   }
 }

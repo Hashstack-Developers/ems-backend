@@ -1,3 +1,4 @@
+import { roundAmount } from '../common/utils/currency.utils';
 import {
   BadRequestException,
   Injectable,
@@ -163,7 +164,7 @@ export class GpFundAdvanceService {
       monthlyInstallment: Number(advance.monthlyInstallment),
       installmentMonths: advance.installmentMonths,
       remainingBefore,
-      remainingAfter: this.round(remainingBefore - amount),
+      remainingAfter: roundAmount(remainingBefore - amount),
       installmentNumber: advance.installmentsPaid + 1,
     };
   }
@@ -187,7 +188,7 @@ export class GpFundAdvanceService {
       throw new BadRequestException('GP Fund advance payment already recorded for this payroll');
     }
 
-    advance.amountRepaid = this.round(Number(advance.amountRepaid) + amount);
+    advance.amountRepaid = roundAmount(Number(advance.amountRepaid) + amount);
     advance.installmentsPaid += 1;
 
     const remaining = getAdvanceRemainingBalance(advance);
@@ -215,7 +216,7 @@ export class GpFundAdvanceService {
     if (!payment) return;
 
     const advance = payment.advance;
-    advance.amountRepaid = this.round(
+    advance.amountRepaid = roundAmount(
       Math.max(0, Number(advance.amountRepaid) - Number(payment.amount)),
     );
     advance.installmentsPaid = Math.max(0, advance.installmentsPaid - 1);
@@ -264,10 +265,10 @@ export class GpFundAdvanceService {
       activeCount: activeAdvances.length,
       completedCount: completedAdvances.length,
       cancelledCount: advances.filter((a) => a.status === GpFundAdvanceStatus.CANCELLED).length,
-      totalAdvanced: this.round(totalAdvanced),
-      totalRepaid: this.round(totalRepaid),
-      totalOutstanding: this.round(totalOutstanding),
-      monthlyInstallmentsDue: this.round(monthlyInstallmentsDue),
+      totalAdvanced: roundAmount(totalAdvanced),
+      totalRepaid: roundAmount(totalRepaid),
+      totalOutstanding: roundAmount(totalOutstanding),
+      monthlyInstallmentsDue: roundAmount(monthlyInstallmentsDue),
       totalInstallmentsCollected,
       advances: advances.map((advance) => this.mapAdvanceRow(advance)),
     };
@@ -282,10 +283,10 @@ export class GpFundAdvanceService {
       name: advance.employee?.name ?? '',
       designation: advance.employee?.designation ?? '',
       gpFundScale: advance.employee?.gpFund ?? null,
-      advanceAmount: Number(advance.advanceAmount),
+      advanceAmount: roundAmount(advance.advanceAmount),
       installmentMonths: advance.installmentMonths,
-      monthlyInstallment: Number(advance.monthlyInstallment),
-      amountRepaid: Number(advance.amountRepaid),
+      monthlyInstallment: roundAmount(advance.monthlyInstallment),
+      amountRepaid: roundAmount(advance.amountRepaid),
       remainingBalance: remaining,
       installmentsPaid: advance.installmentsPaid,
       installmentsRemaining: Math.max(0, advance.installmentMonths - advance.installmentsPaid),
@@ -297,7 +298,7 @@ export class GpFundAdvanceService {
         .map((payment) => ({
           id: payment.id,
           payrollId: payment.payrollId,
-          amount: Number(payment.amount),
+          amount: roundAmount(payment.amount),
           month: payment.month,
           year: payment.year,
         })),
@@ -306,9 +307,5 @@ export class GpFundAdvanceService {
 
   getDeductionCode(): string {
     return GP_FUND_ADVANCE_CODE;
-  }
-
-  private round(value: number): number {
-    return Math.round(value * 100) / 100;
   }
 }

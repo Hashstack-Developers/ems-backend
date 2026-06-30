@@ -41,6 +41,8 @@ export const PERMISSION_DEFINITIONS: readonly PermissionDefinition[] = [
   { key: 'gpFund.create', module: 'gpFund', action: 'create', description: 'Create GP fund records' },
   { key: 'gpFund.update', module: 'gpFund', action: 'update', description: 'Update GP fund records' },
   { key: 'gpFund.delete', module: 'gpFund', action: 'delete', description: 'Delete GP fund records' },
+  { key: 'gpFund.generate', module: 'gpFund', action: 'generate', description: 'Generate GP fund reports' },
+  { key: 'gpFund.export', module: 'gpFund', action: 'export', description: 'Export GP fund report PDFs' },
 
   { key: 'reports.view', module: 'reports', action: 'view', description: 'View reports' },
   { key: 'reports.export', module: 'reports', action: 'export', description: 'Export reports' },
