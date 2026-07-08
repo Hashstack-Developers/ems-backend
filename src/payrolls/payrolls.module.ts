@@ -18,7 +18,11 @@ import { SalarySlipsService } from './salary-slips.service';
     GpFundModule,
   ],
   controllers: [PayrollsController, SalarySlipsController],
-  providers: [PayrollsService, SalarySlipsService],
-  exports: [PayrollsService, SalarySlipsService],
+  providers: [
+    PayrollsService,
+    SalarySlipsService,
+    { provide: 'PayrollsService', useExisting: PayrollsService },
+  ],
+  exports: [PayrollsService, SalarySlipsService, 'PayrollsService'],
 })
 export class PayrollsModule {}

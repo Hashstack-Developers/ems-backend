@@ -233,6 +233,12 @@ export class Employee {
   })
   status: EmployeeStatus;
 
+  @Column({ name: 'payroll_on_hold', type: 'boolean', default: false })
+  payrollOnHold: boolean;
+
+  @Column({ name: 'payroll_held_from', type: 'date', nullable: true })
+  payrollHeldFrom: Date | null;
+
   @OneToMany(() => Payroll, (payroll) => payroll.employee)
   payrolls: Payroll[];
 

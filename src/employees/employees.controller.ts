@@ -9,12 +9,18 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { IsBoolean } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RequirePermissions } from '../rbac/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../rbac/guards/permissions.guard';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { EmployeesService } from './employees.service';
+
+class SetPayrollHoldDto {
+  @IsBoolean()
+  onHold!: boolean;
+}
 
 @Controller('employees')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -24,8 +30,25 @@ export class EmployeesController {
   @Post()
   @RequirePermissions('employees.create')
   async create(@Body() dto: CreateEmployeeDto) {
-    const data = await this.employeesService.create(dto);
-    return { success: true, data };
+    console.log('[CONTROLLER] POST /employees - Create employee request received');
+    console.log('[CONTROLLER] Request body:', {
+      name: dto.name,
+      email: dto.email,
+      cnicNo: dto.cnicNo,
+      dateOfJoining: dto.dateOfJoining,
+    });
+    try {
+      console.log('[CONTROLLER] Calling employeesService.create()');
+      const data = await this.employeesService.create(dto);
+      console.log('[CONTROLLER] Employee created successfully with ID:', data.id);
+      return { success: true, data };
+    } catch (error) {
+      console.error('[CONTROLLER] Error creating employee:', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      throw error;
+    }
   }
 
   @Get()
@@ -50,6 +73,16 @@ export class EmployeesController {
   ) {
     const data = await this.employeesService.update(id, dto);
     return { success: true, data };
+  }
+
+  @Patch(':id/payroll-hold')
+  @RequirePermissions('payrolls.generate')
+  async setPayrollHold(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SetPayrollHoldDto,
+  ) {
+    await this.employeesService.setPayrollHold(id, dto.onHold);
+    return { success: true, message: dto.onHold ? 'Payroll hold enabled' : 'Payroll hold removed' };
   }
 
   @Delete(':id')

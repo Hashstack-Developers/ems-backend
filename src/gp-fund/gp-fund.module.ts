@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { EmployeesModule } from '../employees/employees.module';
 import { Employee } from '../employees/entities/employee.entity';
 import { Payroll } from '../payrolls/entities/payroll.entity';
+import { PayrollDeduction } from '../payrolls/entities/payroll-deduction.entity';
 import { GpFundRecord } from './entities/gp-fund-record.entity';
 import { GpFundMarkupSettings } from './entities/gp-fund-markup-settings.entity';
 import { GpFundScale } from './entities/gp-fund-scale.entity';
@@ -22,6 +23,7 @@ import { GpFundService } from './gp-fund.service';
     GpFundAdvance,
     GpFundAdvancePayment,
     Payroll,
+    PayrollDeduction,
     Employee,
   ]), EmployeesModule],
   controllers: [GpFundController],

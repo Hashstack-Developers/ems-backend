@@ -23,6 +23,8 @@ import { Role } from './rbac/entities/role.entity';
 import { RbacModule } from './rbac/rbac.module';
 import { User } from './users/entities/user.entity';
 import { UsersModule } from './users/users.module';
+import { MailModule } from './mail/mail.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -59,6 +61,7 @@ import { UsersModule } from './users/users.module';
       };
       },
     }),
+    MailModule,
     RbacModule,
     UsersModule,
     AuthModule,

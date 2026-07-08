@@ -1,7 +1,8 @@
-import { roundAmount } from '../common/utils/currency.utils';
+import { roundAmount, formatAmount } from '../common/utils/currency.utils';
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -9,9 +10,10 @@ import { Repository } from 'typeorm';
 import { EmployeesService } from '../employees/employees.service';
 import { computePayrollGross, getEmployeeFullName } from '../employees/employee.utils';
 import { Employee, EmployeeStatus } from '../employees/entities/employee.entity';
-import { GP_FUND_ANNUAL_MARKUP_CODE, GP_FUND_ADVANCE_CODE, GP_FUND_DEDUCTION_CODE, GP_FUND_MONTHLY_MARKUP_CODE } from '../gp-fund/gp-fund.utils';
+import { GP_FUND_ANNUAL_MARKUP_CODE, GP_FUND_ADVANCE_CODE, GP_FUND_DEDUCTION_CODE } from '../gp-fund/gp-fund.utils';
 import { GpFundAdvanceService } from '../gp-fund/gp-fund-advance.service';
 import { GpFundService } from '../gp-fund/gp-fund.service';
+import { MailService } from '../mail/mail.service';
 import { TaxSlabsService } from '../tax-slabs/tax-slabs.service';
 import { GeneratePayrollDto } from './dto/generate-payroll.dto';
 import {
@@ -21,6 +23,12 @@ import {
 } from './entities/payroll-deduction.entity';
 import { SubTaxType } from '../tax-slabs/entities/sub-tax.entity';
 import { Payroll, PayrollStatus } from './entities/payroll.entity';
+import { SalarySlipsService } from './salary-slips.service';
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
 
 export interface PayrollGenerationSkip {
   employeeId: number;
@@ -63,6 +71,8 @@ export interface PayrollGenerationStatus {
 
 @Injectable()
 export class PayrollsService {
+  private readonly logger = new Logger(PayrollsService.name);
+
   constructor(
     @InjectRepository(Payroll)
     private readonly payrollsRepository: Repository<Payroll>,
@@ -72,6 +82,8 @@ export class PayrollsService {
     private readonly taxSlabsService: TaxSlabsService,
     private readonly gpFundService: GpFundService,
     private readonly gpFundAdvanceService: GpFundAdvanceService,
+    private readonly salarySlipsService: SalarySlipsService,
+    private readonly mailService: MailService,
   ) {}
 
   async generate(dto: GeneratePayrollDto): Promise<PayrollGenerationResult> {
@@ -103,6 +115,23 @@ export class PayrollsService {
 
     for (const employee of employees) {
       try {
+        if (employee.payrollOnHold) {
+          result.skipped.push({
+            employeeId: employee.id,
+            employeeCode: employee.employeeCode,
+            fullName: getEmployeeFullName(employee),
+            reason: 'Payroll on hold',
+          });
+          continue;
+        }
+
+        if (employee.payrollHeldFrom) {
+          const catchUpPayrolls = await this.catchUpHeldPayrolls(employee, dto.month, dto.year);
+          result.created.push(...catchUpPayrolls);
+          await this.employeesService.clearPayrollHeldFrom(employee.id);
+          continue;
+        }
+
         const outcome = await this.tryGenerateForEmployee(
           employee,
           dto.month,
@@ -144,7 +173,42 @@ export class PayrollsService {
       errorCount: result.errors.length,
     };
 
+    this.sendPayrollEmails(result.created, dto.month, dto.year);
+
     return result;
+  }
+
+  private sendPayrollEmails(payrolls: Payroll[], month: number, year: number): void {
+    if (!this.mailService.isEnabled() || payrolls.length === 0) return;
+
+    const monthLabel = `${MONTH_NAMES[month - 1]} ${year}`;
+
+    void Promise.allSettled(
+      payrolls.map(async (payroll) => {
+        const employeeEmail = payroll.employee?.email;
+        if (!employeeEmail) return;
+
+        try {
+          const { buffer, filename } = await this.salarySlipsService.generatePdf(payroll.id);
+          await this.mailService.sendSalarySlip({
+            to: employeeEmail,
+            employeeName: payroll.employee.name,
+            employeeCode: payroll.employee.employeeCode,
+            monthLabel,
+            grossSalary: `Rs. ${formatAmount(payroll.grossSalary)}`,
+            totalDeductions: `Rs. ${formatAmount(payroll.totalDeductions)}`,
+            netSalary: `Rs. ${formatAmount(payroll.netSalary)}`,
+            pdfBuffer: buffer,
+            filename,
+          });
+          this.logger.log(`Salary slip email sent to ${employeeEmail} (${payroll.employee.employeeCode}) for ${monthLabel}`);
+        } catch (err) {
+          this.logger.error(
+            `Failed to send salary slip email to ${employeeEmail} (${payroll.employee?.employeeCode}): ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }),
+    );
   }
 
   async getGenerationStatus(
@@ -466,20 +530,6 @@ export class PayrollsService {
       });
     }
 
-    if (gpFund.monthlyMarkupAmount > 0 && gpFund.scaleCode) {
-      deductions.push({
-        payrollId: savedPayroll.id,
-        name: `GP Fund Monthly Markup (${markupRates.monthlyMarkupRate}%)`,
-        code: GP_FUND_MONTHLY_MARKUP_CODE,
-        category: DeductionCategory.GP_FUND,
-        amount: gpFund.monthlyMarkupAmount,
-        calculationType: DeductionCalculationType.PERCENTAGE,
-        appliedRate: markupRates.monthlyMarkupRate,
-        appliedFixedAmount: gpFund.baseAmount,
-        sourceSubTaxId: null,
-      });
-    }
-
     if (gpFund.annualMarkupAmount > 0 && gpFund.scaleCode) {
       deductions.push({
         payrollId: savedPayroll.id,
@@ -523,6 +573,34 @@ export class PayrollsService {
     }
 
     return this.findOne(savedPayroll.id);
+  }
+
+  private async catchUpHeldPayrolls(
+    employee: Employee,
+    currentMonth: number,
+    currentYear: number,
+  ): Promise<Payroll[]> {
+    const heldFrom = new Date(employee.payrollHeldFrom!);
+    let m = heldFrom.getUTCMonth() + 1;
+    let y = heldFrom.getUTCFullYear();
+    const created: Payroll[] = [];
+
+    while (y < currentYear || (y === currentYear && m <= currentMonth)) {
+      const outcome = await this.tryGenerateForEmployee(employee, m, y);
+      if (outcome.type === 'created') {
+        created.push(outcome.payroll);
+      }
+      m++;
+      if (m > 12) { m = 1; y++; }
+    }
+
+    return created;
+  }
+
+  async getEmployeeHolds(): Promise<
+    { id: number; employeeCode: string; name: string; designation: string; payrollOnHold: boolean; payrollHeldFrom: Date | null }[]
+  > {
+    return this.employeesService.findActiveEmployeesWithHoldStatus() as Promise<any>;
   }
 
   private validatePeriod(month: number, year: number): void {

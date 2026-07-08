@@ -11,15 +11,6 @@ export class GpFundMarkupSettings {
   id: number;
 
   @Column({
-    name: 'monthly_markup_rate',
-    type: 'decimal',
-    precision: 5,
-    scale: 2,
-    default: 0,
-  })
-  monthlyMarkupRate: number;
-
-  @Column({
     name: 'annual_markup_rate',
     type: 'decimal',
     precision: 5,

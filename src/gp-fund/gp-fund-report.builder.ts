@@ -101,27 +101,30 @@ export function buildPeriodLabel(years?: number[], months?: number[]): string {
 function buildEmployeeInfoFields(employee: Employee, dated: string): GpFundReportInfoField[] {
   const rows: Array<[string, string]> = [
     ['Dated', dated],
-    ['Date of Birth', formatSlipDate(employee.dateOfBirth)],
-    ['Bank Name', SALARY_SLIP_BANK.name],
-    ['Employee ID', employee.employeeCode],
-    ['Superannuation Date', formatSlipDate(employee.dateOfRetirement)],
-    ['Branch', SALARY_SLIP_BANK.branch],
+    // Personal details
     ['Name', getEmployeeFullName(employee)],
-    ['Date of Joining', formatSlipDate(employee.dateOfJoining)],
-    ['Branch Code', SALARY_SLIP_BANK.branchCode],
     ["Father's Name", employee.fatherName ?? '—'],
-    ['Date of Regularization', formatSlipDate(employee.dateOfRegularization)],
-    ['Employee Account #', employee.accountNumber ?? '—'],
-    ['Designation', employee.designation],
-    ['Length of Service', employee.lengthOfService ?? '—'],
-    ['GPF Account #', employee.gpfAccountNumber ?? '—'],
-    ['BPS', employee.basicPayScale ?? '—'],
-    ['Stage', employee.stage ?? '—'],
+    ['Date of Birth', formatSlipDate(employee.dateOfBirth)],
     ['CNIC #', employee.cnicNo ?? '—'],
-    ['Status', formatEmploymentStatus(employee.employmentType)],
     ['Contact', employee.mobile ?? '—'],
     ['Name of Nominee', employee.nomineeName ?? '—'],
     ['Relation of Nominee', employee.nomineeRelation ?? '—'],
+    // Employment / service details
+    ['Employee ID', employee.employeeCode],
+    ['Designation', employee.designation],
+    ['BPS', employee.basicPayScale ?? '—'],
+    ['Stage', employee.stage ?? '—'],
+    ['Status', formatEmploymentStatus(employee.employmentType)],
+    ['Date of Joining', formatSlipDate(employee.dateOfJoining)],
+    ['Date of Regularization', formatSlipDate(employee.dateOfRegularization)],
+    ['Length of Service', employee.lengthOfService ?? '—'],
+    ['Superannuation Date', formatSlipDate(employee.dateOfRetirement)],
+    ['Employee Account #', employee.accountNumber ?? '—'],
+    ['GPF Account #', employee.gpfAccountNumber ?? '—'],
+    // Bank details
+    ['Bank Name', SALARY_SLIP_BANK.name],
+    ['Branch', SALARY_SLIP_BANK.branch],
+    ['Branch Code', SALARY_SLIP_BANK.branchCode],
   ];
 
   return rows
@@ -129,10 +132,90 @@ function buildEmployeeInfoFields(employee: Employee, dated: string): GpFundRepor
     .map(([label, value]) => ({ label, value: value.trim() }));
 }
 
+function sumContributionField(
+  rows: GpFundReportContributionRow[],
+  field: keyof Pick<
+    GpFundReportContributionRow,
+    | 'gpFundBaseAmount'
+    | 'monthlyMarkupAmount'
+    | 'annualMarkupAmount'
+    | 'advanceInstallmentAmount'
+    | 'gpFundAmount'
+  >,
+): number {
+  return roundAmount(rows.reduce((total, row) => total + roundAmount(row[field]), 0));
+}
+
+/** GP fund fiscal year: July of `fiscalYear` through June of `fiscalYear + 1`. */
+function getFiscalYear(month: number, year: number): number {
+  return month >= 7 ? year : year - 1;
+}
+
+function formatFiscalYearLabel(fiscalYear: number): string {
+  return `July ${fiscalYear} - June ${fiscalYear + 1}`;
+}
+
+function formatPartialYearLabel(rows: GpFundReportContributionRow[]): string {
+  if (rows.length === 1) {
+    const row = rows[0];
+    return `${MONTH_NAMES[row.month - 1]} ${row.year}`;
+  }
+
+  const first = rows[0];
+  const last = rows[rows.length - 1];
+  const firstMonth = MONTH_NAMES[first.month - 1];
+  const lastMonth = MONTH_NAMES[last.month - 1];
+  return `${firstMonth} ${first.year} - ${lastMonth} ${last.year}`;
+}
+
+function isCompleteFiscalYear(rows: GpFundReportContributionRow[]): boolean {
+  if (rows.length !== 12) return false;
+  const monthsPresent = new Set(rows.map((row) => row.month));
+  const fiscalMonths = [7, 8, 9, 10, 11, 12, 1, 2, 3, 4, 5, 6];
+  return fiscalMonths.every((month) => monthsPresent.has(month));
+}
+
+/** Collapse monthly payroll rows into fiscal-year (July -> June) or partial-year rows for the GP fund slip table. */
+export function aggregateContributionsForReport(
+  contributions: GpFundReportContributionRow[],
+): GpFundReportContributionRow[] {
+  if (contributions.length === 0) return [];
+
+  const byFiscalYear = new Map<number, GpFundReportContributionRow[]>();
+  for (const contribution of contributions) {
+    const fiscalYear = getFiscalYear(contribution.month, contribution.year);
+    const yearRows = byFiscalYear.get(fiscalYear) ?? [];
+    yearRows.push(contribution);
+    byFiscalYear.set(fiscalYear, yearRows);
+  }
+
+  return [...byFiscalYear.keys()]
+    .sort((a, b) => a - b)
+    .map((fiscalYear) => {
+      const rows = [...(byFiscalYear.get(fiscalYear) ?? [])].sort(
+        (a, b) => (a.year === b.year ? a.month - b.month : a.year - b.year),
+      );
+      const latest = rows[rows.length - 1];
+
+      return {
+        label: isCompleteFiscalYear(rows)
+          ? formatFiscalYearLabel(fiscalYear)
+          : formatPartialYearLabel(rows),
+        month: latest.month,
+        year: latest.year,
+        subscriptionValue: latest.subscriptionValue,
+        gpFundBaseAmount: sumContributionField(rows, 'gpFundBaseAmount'),
+        monthlyMarkupAmount: sumContributionField(rows, 'monthlyMarkupAmount'),
+        annualMarkupAmount: sumContributionField(rows, 'annualMarkupAmount'),
+        advanceInstallmentAmount: sumContributionField(rows, 'advanceInstallmentAmount'),
+        gpFundAmount: sumContributionField(rows, 'gpFundAmount'),
+      };
+    });
+}
+
 function buildFundTableRows(
   employee: Employee,
   contributions: GpFundReportContributionRow[],
-  monthlyMarkupRate: number,
   annualMarkupRate: number,
 ): { rows: GpFundSlipTableRow[]; totalGpfBalance: number } {
   let runningTotal = roundAmount(employee.previouslyCollectedGpFund);
@@ -147,8 +230,6 @@ function buildFundTableRows(
     let collectionRate = '—';
     if (contrib.annualMarkupAmount > 0) {
       collectionRate = `${annualMarkupRate}%`;
-    } else if (contrib.monthlyMarkupAmount > 0) {
-      collectionRate = `${monthlyMarkupRate}%`;
     } else if (parseAmount(employee.gpfCollection) > 0) {
       collectionRate = `${parseAmount(employee.gpfCollection)}%`;
     }
@@ -187,7 +268,6 @@ export interface BuildGpFundReportInput {
   employee: Employee;
   subscriptionValue: number;
   totalCollected: number;
-  monthlyMarkupRate: number;
   annualMarkupRate: number;
   contributions: GpFundReportContributionRow[];
   advancePayable: number;
@@ -202,10 +282,10 @@ export function buildGpFundReportPayload(input: BuildGpFundReportInput): GpFundR
   const yearToken = input.years?.length === 1 ? String(input.years[0]) : 'ALL';
   const dated = formatDated(new Date().toISOString().slice(0, 10));
   const openingBalance = roundAmount(emp.previouslyCollectedGpFund);
+  const aggregatedContributions = aggregateContributionsForReport(input.contributions);
   const { rows: fundTableRows, totalGpfBalance: chainGpfBalance } = buildFundTableRows(
     emp,
-    input.contributions,
-    input.monthlyMarkupRate,
+    aggregatedContributions,
     input.annualMarkupRate,
   );
   const totalGpfBalance = fundTableRows.length > 0

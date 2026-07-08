@@ -255,7 +255,7 @@ export class SalarySlipsService {
   }
 
   private getSalarySlipLogoPath(filename: string): string {
-    return path.join(__dirname, '..', 'assets', 'salary-slip', filename);
+    return path.join(__dirname, '..', '..', 'assets', 'salary-slip', filename);
   }
 
   private formatDeductionAmount(item: SalarySlipLineItem | undefined): string {

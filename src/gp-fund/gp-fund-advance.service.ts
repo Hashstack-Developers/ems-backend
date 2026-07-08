@@ -7,6 +7,12 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Employee } from '../employees/entities/employee.entity';
+import { Payroll } from '../payrolls/entities/payroll.entity';
+import {
+  DeductionCalculationType,
+  DeductionCategory,
+  PayrollDeduction,
+} from '../payrolls/entities/payroll-deduction.entity';
 import { CreateGpFundAdvanceDto } from './dto/create-gp-fund-advance.dto';
 import { GpFundAdvanceQueryDto } from './dto/gp-fund-advance-query.dto';
 import { GpFundAdvancePayment } from './entities/gp-fund-advance-payment.entity';
@@ -19,7 +25,9 @@ import {
   calculateAdvanceMonthlyInstallment,
   getAdvanceRemainingBalance,
   GP_FUND_ADVANCE_CODE,
+  GP_FUND_ADVANCE_MAX_PERCENTAGE_OF_BALANCE,
 } from './gp-fund.utils';
+import { GpFundService } from './gp-fund.service';
 
 export interface GpFundAdvanceInstallmentResult {
   advanceId: number;
@@ -40,6 +48,11 @@ export class GpFundAdvanceService {
     private readonly paymentRepository: Repository<GpFundAdvancePayment>,
     @InjectRepository(Employee)
     private readonly employeeRepository: Repository<Employee>,
+    @InjectRepository(Payroll)
+    private readonly payrollsRepository: Repository<Payroll>,
+    @InjectRepository(PayrollDeduction)
+    private readonly payrollDeductionRepository: Repository<PayrollDeduction>,
+    private readonly gpFundService: GpFundService,
   ) {}
 
   async findAll(query: GpFundAdvanceQueryDto = {}): Promise<GpFundAdvance[]> {
@@ -78,6 +91,23 @@ export class GpFundAdvanceService {
     });
   }
 
+  async getAdvanceEligibility(employeeId: number): Promise<{
+    totalGpFundBalance: number;
+    maxAdvancePercentage: number;
+    maxAdvanceAmount: number;
+  }> {
+    const totalGpFundBalance = await this.gpFundService.getCurrentTotalGpFundBalance(employeeId);
+    const maxAdvanceAmount = roundAmount(
+      (totalGpFundBalance * GP_FUND_ADVANCE_MAX_PERCENTAGE_OF_BALANCE) / 100,
+    );
+
+    return {
+      totalGpFundBalance,
+      maxAdvancePercentage: GP_FUND_ADVANCE_MAX_PERCENTAGE_OF_BALANCE,
+      maxAdvanceAmount,
+    };
+  }
+
   async create(dto: CreateGpFundAdvanceDto): Promise<GpFundAdvance> {
     const employee = await this.employeeRepository.findOne({
       where: { id: dto.employeeId },
@@ -90,6 +120,15 @@ export class GpFundAdvanceService {
     if (existingActive) {
       throw new BadRequestException(
         `${employee.name} already has an active GP Fund advance. Complete or cancel it before assigning a new one.`,
+      );
+    }
+
+    const { totalGpFundBalance, maxAdvanceAmount } = await this.getAdvanceEligibility(
+      dto.employeeId,
+    );
+    if (dto.advanceAmount > maxAdvanceAmount) {
+      throw new BadRequestException(
+        `Advance amount cannot exceed ${GP_FUND_ADVANCE_MAX_PERCENTAGE_OF_BALANCE}% of ${employee.name}'s total GP fund balance (Rs. ${maxAdvanceAmount.toLocaleString('en-PK')} of Rs. ${totalGpFundBalance.toLocaleString('en-PK')}).`,
       );
     }
 
@@ -110,7 +149,82 @@ export class GpFundAdvanceService {
       notes: dto.notes?.trim() || null,
     });
 
-    return this.advanceRepository.save(advance);
+    const savedAdvance = await this.advanceRepository.save(advance);
+    await this.backfillPastInstallments(savedAdvance);
+    return this.findOne(savedAdvance.id);
+  }
+
+  /**
+   * If the advance's takenDate falls on or before an already-generated payroll
+   * month, that payroll was created before this advance existed and never got
+   * its installment deducted. Catch those up now — in chronological order,
+   * one installment per already-existing payroll — until either the advance
+   * is fully repaid or we run out of past payrolls.
+   */
+  private async backfillPastInstallments(advance: GpFundAdvance): Promise<void> {
+    const takenDate = new Date(advance.takenDate);
+    const takenYear = takenDate.getFullYear();
+    const takenMonth = takenDate.getMonth() + 1;
+
+    const payrolls = await this.payrollsRepository.find({
+      where: { employeeId: advance.employeeId },
+      relations: { deductions: true },
+    });
+
+    const eligiblePayrolls = payrolls
+      .filter((payroll) => {
+        if (payroll.year > takenYear) return true;
+        if (payroll.year < takenYear) return false;
+        return payroll.month >= takenMonth;
+      })
+      .filter((payroll) => !payroll.deductions?.some((d) => d.code === GP_FUND_ADVANCE_CODE))
+      .sort((a, b) => (a.year === b.year ? a.month - b.month : a.year - b.year));
+
+    let workingAdvance = advance;
+
+    for (const payroll of eligiblePayrolls) {
+      if (getAdvanceRemainingBalance(workingAdvance) <= 0) break;
+
+      const amount = calculateAdvanceInstallmentAmount(workingAdvance);
+      if (amount <= 0) break;
+
+      const installmentNumber = workingAdvance.installmentsPaid + 1;
+
+      await this.payrollDeductionRepository.save(
+        this.payrollDeductionRepository.create({
+          payrollId: payroll.id,
+          name: `GP Fund Advance Installment (${installmentNumber}/${workingAdvance.installmentMonths})`,
+          code: GP_FUND_ADVANCE_CODE,
+          category: DeductionCategory.GP_FUND,
+          amount,
+          calculationType: DeductionCalculationType.FIXED,
+          appliedRate: null,
+          appliedFixedAmount: Number(workingAdvance.monthlyInstallment),
+          sourceSubTaxId: null,
+        }),
+      );
+
+      payroll.totalDeductions = roundAmount(Number(payroll.totalDeductions) + amount);
+      payroll.netSalary = roundAmount(Number(payroll.netSalary) - amount);
+      await this.payrollsRepository.save(payroll);
+
+      workingAdvance.amountRepaid = roundAmount(Number(workingAdvance.amountRepaid) + amount);
+      workingAdvance.installmentsPaid += 1;
+      if (getAdvanceRemainingBalance(workingAdvance) <= 0) {
+        workingAdvance.status = GpFundAdvanceStatus.COMPLETED;
+      }
+      workingAdvance = await this.advanceRepository.save(workingAdvance);
+
+      await this.paymentRepository.save(
+        this.paymentRepository.create({
+          advanceId: workingAdvance.id,
+          payrollId: payroll.id,
+          amount,
+          month: payroll.month,
+          year: payroll.year,
+        }),
+      );
+    }
   }
 
   async cancel(id: number): Promise<GpFundAdvance> {

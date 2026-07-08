@@ -25,7 +25,7 @@ export class GpFundAdvance {
   @Column({ name: 'employee_id' })
   employeeId: number;
 
-  @ManyToOne(() => Employee)
+  @ManyToOne(() => Employee, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'employee_id' })
   employee: Employee;
 

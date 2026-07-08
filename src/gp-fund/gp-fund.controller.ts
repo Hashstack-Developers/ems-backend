@@ -108,6 +108,15 @@ export class GpFundController {
     return { success: true, data };
   }
 
+  @Get('advances/employee/:employeeId/eligibility')
+  @RequirePermissions('gpFund.view')
+  async getAdvanceEligibility(
+    @Param('employeeId', ParseIntPipe) employeeId: number,
+  ) {
+    const data = await this.gpFundAdvanceService.getAdvanceEligibility(employeeId);
+    return { success: true, data };
+  }
+
   @Post('advances')
   @RequirePermissions('gpFund.create')
   async createAdvance(@Body() dto: CreateGpFundAdvanceDto) {

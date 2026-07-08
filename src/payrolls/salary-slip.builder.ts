@@ -105,7 +105,7 @@ function formatDisplayDate(value: string | null | undefined): string {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString('en-US', {
+  return date.toLocaleDateString('en-GB', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -126,20 +126,23 @@ function buildEmployeeInfoFields(
   employee: SalarySlipPayload['employee'],
 ): SalarySlipInfoField[] {
   const rows: Array<[string, string]> = [
-    ['Employee ID', employee.employeeCode],
+    // Personal details
     ['Name', employee.fullName],
     ["Father's Name", employee.fatherName],
-    ['Designation', employee.designation],
-    ['BPS', employee.basicPayScale],
+    ['Date of Birth', employee.dateOfBirth],
     ['CNIC', employee.cnicNo],
     ['Contact', employee.mobile],
     ['Email', employee.email],
-    ['Date of Birth', employee.dateOfBirth],
-    ['Superannuation Date', employee.dateOfRetirement],
-    ['Date of Joining', employee.dateOfJoining],
-    ['Length of Service', employee.lengthOfService],
+    // Employment / service details
+    ['Employee ID', employee.employeeCode],
+    ['Designation', employee.designation],
+    ['BPS', employee.basicPayScale],
     ['Stage', employee.stage],
     ['Status (Regular/Contract)', employee.employmentType],
+    ['Date of Joining', employee.dateOfJoining],
+    ['Length of Service', employee.lengthOfService],
+    ['Superannuation Date', employee.dateOfRetirement],
+    // Bank details
     ['Bank Name', employee.bankName],
     ['Branch', employee.bankBranch],
     ['Account No.', employee.accountNumber],

@@ -232,7 +232,6 @@ export class GpFundReportsService {
       employee,
       subscriptionValue: employeeStats?.subscriptionValue ?? 0,
       totalCollected: employeeStats?.totalCollected ?? 0,
-      monthlyMarkupRate: overview.summary.monthlyMarkupRate,
       annualMarkupRate: overview.summary.annualMarkupRate,
       contributions,
       advancePayable: advance?.advanceAmount ?? 0,
@@ -243,7 +242,7 @@ export class GpFundReportsService {
   }
 
   private getLogoPath(filename: string): string {
-    return path.join(__dirname, '..', 'assets', 'salary-slip', filename);
+    return path.join(__dirname, '..', '..', 'assets', 'salary-slip', filename);
   }
 
   private drawTableCell(
@@ -286,7 +285,7 @@ export class GpFundReportsService {
         const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
         const left = doc.page.margins.left;
         const logoSize = 52;
-        const dataRowHeight = 18;
+        const dataRowHeight = 20;
         const headerRowHeight = 30;
 
         doc.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -332,10 +331,10 @@ export class GpFundReportsService {
 
         const columns: Array<{ label: string; width: number; align: 'left' | 'right' | 'center' }> = [
           { label: 'Sr.\nNo.', width: pageWidth * 0.06, align: 'center' },
-          { label: 'Subscription of\nGP Fund per Month', width: pageWidth * 0.13, align: 'right' },
-          { label: 'Tenure', width: pageWidth * 0.13, align: 'left' },
-          { label: 'Balance\nc/f', width: pageWidth * 0.12, align: 'right' },
-          { label: 'Collection\nof GP Fund', width: pageWidth * 0.12, align: 'right' },
+          { label: 'Subscription of\nGP Fund per Month', width: pageWidth * 0.10, align: 'right' },
+          { label: 'Tenure', width: pageWidth * 0.19, align: 'left' },
+          { label: 'Balance\nc/f', width: pageWidth * 0.10, align: 'right' },
+          { label: 'Collection\nof GP Fund', width: pageWidth * 0.11, align: 'right' },
           { label: 'Mark-up Rate\nper Anum', width: pageWidth * 0.12, align: 'right' },
           { label: 'GP Fund\nincluding Mark-up', width: pageWidth * 0.12, align: 'right' },
           { label: 'Total Balance\n(Inclusive Mark-UP)', width: pageWidth * 0.20, align: 'right' },
@@ -359,6 +358,7 @@ export class GpFundReportsService {
           values.forEach((value, index) => {
             this.drawTableCell(doc, value, x, y, columns[index].width, dataRowHeight, {
               align: columns[index].align,
+              fontSize: index === 2 ? 6 : 6.5,
             });
             x += columns[index].width;
           });

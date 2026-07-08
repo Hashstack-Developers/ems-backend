@@ -22,9 +22,9 @@ import { UpdateGpFundMarkupDto } from './dto/update-gp-fund-markup.dto';
 import {
   buildGpFundBreakdown,
   calculateAnnualMarkupAmount,
-  calculateMonthlyMarkupAmount,
+  getGpFundFiscalYear,
   GP_FUND_DEDUCTION_CODE,
-  GP_FUND_MONTHLY_MARKUP_CODE,
+  GP_FUND_FISCAL_YEAR_CLOSE_MONTH,
   GpFundAmountBreakdown,
   GpFundMarkupRates,
   resolveGpFundAmount,
@@ -90,7 +90,6 @@ export class GpFundService {
     if (!settings) {
       settings = this.gpFundMarkupRepository.create({
         id: 1,
-        monthlyMarkupRate: 0,
         annualMarkupRate: 0,
       });
       await this.gpFundMarkupRepository.save(settings);
@@ -101,18 +100,13 @@ export class GpFundService {
   async updateMarkupSettings(dto: UpdateGpFundMarkupDto): Promise<GpFundMarkupSettings> {
     const settings = await this.getMarkupSettings();
     const hasChanges =
-      (dto.monthlyMarkupRate !== undefined
-        && Number(dto.monthlyMarkupRate) !== Number(settings.monthlyMarkupRate))
-      || (dto.annualMarkupRate !== undefined
-        && Number(dto.annualMarkupRate) !== Number(settings.annualMarkupRate));
+      dto.annualMarkupRate !== undefined
+      && Number(dto.annualMarkupRate) !== Number(settings.annualMarkupRate);
 
     if (!hasChanges) {
       throw new NoChangesException();
     }
 
-    if (dto.monthlyMarkupRate !== undefined) {
-      settings.monthlyMarkupRate = dto.monthlyMarkupRate;
-    }
     if (dto.annualMarkupRate !== undefined) {
       settings.annualMarkupRate = dto.annualMarkupRate;
     }
@@ -122,7 +116,6 @@ export class GpFundService {
 
   getMarkupRatesFromSettings(settings: GpFundMarkupSettings): GpFundMarkupRates {
     return {
-      monthlyMarkupRate: Number(settings.monthlyMarkupRate ?? 0),
       annualMarkupRate: Number(settings.annualMarkupRate ?? 0),
     };
   }
@@ -136,56 +129,130 @@ export class GpFundService {
   ): Promise<GpFundAmountBreakdown> {
     const base = resolveGpFundAmount(employee, scaleMap);
     if (base.amount <= 0 || !base.scaleCode) {
-      return buildGpFundBreakdown(base, markupRates, 0);
+      return buildGpFundBreakdown(base, 0);
     }
 
     let annualMarkupAmount = 0;
-    if (month === 12 && markupRates.annualMarkupRate > 0) {
-      const ytd = await this.getYearToDateGpFundTotals(employee.id, year, month);
-      const monthlyMarkupAmount = calculateMonthlyMarkupAmount(
-        base.amount,
-        markupRates.monthlyMarkupRate,
+    if (month === GP_FUND_FISCAL_YEAR_CLOSE_MONTH && markupRates.annualMarkupRate > 0) {
+      const fiscalYear = getGpFundFiscalYear(month, year);
+      const priorClosingBalance = await this.getPriorFiscalYearsClosingBalance(
+        employee.id,
+        fiscalYear,
+        markupRates.annualMarkupRate,
       );
-      const yearSubtotal = roundAmount(
-        ytd.baseTotal + ytd.monthlyMarkupTotal + base.amount + monthlyMarkupAmount,
+      const fiscalYtdBaseTotal = await this.getFiscalYearToDateGpFundBaseTotal(
+        employee.id,
+        fiscalYear,
       );
+      const yearSubtotal = roundAmount(priorClosingBalance + fiscalYtdBaseTotal + base.amount);
       annualMarkupAmount = calculateAnnualMarkupAmount(
         yearSubtotal,
         markupRates.annualMarkupRate,
       );
     }
 
-    return buildGpFundBreakdown(base, markupRates, annualMarkupAmount);
+    return buildGpFundBreakdown(base, annualMarkupAmount);
   }
 
-  private async getYearToDateGpFundTotals(
+  /**
+   * Current total GP fund balance for an employee (opening balance + all
+   * prior fiscal years compounded with markup + this fiscal year's
+   * contributions so far). Used to cap how much can be taken as an advance.
+   */
+  async getCurrentTotalGpFundBalance(employeeId: number): Promise<number> {
+    const employee = await this.employeeRepository.findOne({ where: { id: employeeId } });
+    if (!employee) return 0;
+
+    const markupSettings = await this.getMarkupSettings();
+    const markupRates = this.getMarkupRatesFromSettings(markupSettings);
+
+    const now = new Date();
+    const currentFiscalYear = getGpFundFiscalYear(now.getMonth() + 1, now.getFullYear());
+
+    const priorClosingBalance = await this.getPriorFiscalYearsClosingBalance(
+      employeeId,
+      currentFiscalYear,
+      markupRates.annualMarkupRate,
+    );
+    const currentFiscalYtdBaseTotal = await this.getFiscalYearToDateGpFundBaseTotal(
+      employeeId,
+      currentFiscalYear,
+    );
+
+    return roundAmount(
+      Number(employee.previouslyCollectedGpFund ?? 0) + priorClosingBalance + currentFiscalYtdBaseTotal,
+    );
+  }
+
+  /** Sums GP fund base contributions already recorded within the given fiscal year (July -> June). */
+  private async getFiscalYearToDateGpFundBaseTotal(
     employeeId: number,
-    year: number,
-    beforeMonth: number,
-  ): Promise<{ baseTotal: number; monthlyMarkupTotal: number }> {
+    fiscalYear: number,
+  ): Promise<number> {
     const payrolls = await this.payrollsRepository.find({
-      where: { employeeId, year },
+      where: { employeeId },
       relations: { deductions: true },
     });
 
     let baseTotal = 0;
-    let monthlyMarkupTotal = 0;
 
     for (const payroll of payrolls) {
-      if (payroll.month >= beforeMonth) continue;
+      if (getGpFundFiscalYear(payroll.month, payroll.year) !== fiscalYear) continue;
       for (const deduction of payroll.deductions ?? []) {
         if (deduction.code === GP_FUND_DEDUCTION_CODE) {
           baseTotal += Number(deduction.amount);
-        } else if (deduction.code === GP_FUND_MONTHLY_MARKUP_CODE) {
-          monthlyMarkupTotal += Number(deduction.amount);
         }
       }
     }
 
-    return {
-      baseTotal: roundAmount(baseTotal),
-      monthlyMarkupTotal: roundAmount(monthlyMarkupTotal),
-    };
+    return roundAmount(baseTotal);
+  }
+
+  /**
+   * Carries the compounded GP fund balance forward from all fiscal years
+   * strictly before `targetFiscalYear`. Each prior fiscal year's own base
+   * contributions are added to the balance carried in from the fiscal year
+   * before it, and — since every fiscal year before the target one has
+   * already reached its June close — the annual markup is compounded on top
+   * before moving to the next fiscal year. This applies even if an employee
+   * only joined partway through that fiscal year (e.g. in May).
+   */
+  private async getPriorFiscalYearsClosingBalance(
+    employeeId: number,
+    targetFiscalYear: number,
+    annualMarkupRate: number,
+  ): Promise<number> {
+    const payrolls = await this.payrollsRepository.find({
+      where: { employeeId },
+      relations: { deductions: true },
+    });
+
+    const baseByFiscalYear = new Map<number, number>();
+    for (const payroll of payrolls) {
+      const fiscalYear = getGpFundFiscalYear(payroll.month, payroll.year);
+      if (fiscalYear >= targetFiscalYear) continue;
+      let base = 0;
+      for (const deduction of payroll.deductions ?? []) {
+        if (deduction.code === GP_FUND_DEDUCTION_CODE) {
+          base += Number(deduction.amount);
+        }
+      }
+      baseByFiscalYear.set(
+        fiscalYear,
+        roundAmount((baseByFiscalYear.get(fiscalYear) ?? 0) + base),
+      );
+    }
+
+    const fiscalYears = [...baseByFiscalYear.keys()].sort((a, b) => a - b);
+    let closingBalance = 0;
+    for (const fiscalYear of fiscalYears) {
+      const subtotal = roundAmount(closingBalance + (baseByFiscalYear.get(fiscalYear) ?? 0));
+      closingBalance = annualMarkupRate > 0
+        ? roundAmount(subtotal * (1 + annualMarkupRate / 100))
+        : subtotal;
+    }
+
+    return closingBalance;
   }
 
   async createScale(dto: CreateGpFundScaleDto): Promise<GpFundScale> {

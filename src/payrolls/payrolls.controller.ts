@@ -32,6 +32,13 @@ export class PayrollsController {
     };
   }
 
+  @Get('employee-holds')
+  @RequirePermissions('payrolls.generate')
+  async getEmployeeHolds() {
+    const data = await this.payrollsService.getEmployeeHolds();
+    return { success: true, data };
+  }
+
   @Get('generation-status')
   @RequirePermissions('payrolls.view')
   async getGenerationStatus(

@@ -15,8 +15,19 @@ export const GP_FUND_DEDUCTION_CODES = [
 
 export const GP_FUND_ADVANCE_MAX_MONTHS = 36;
 
+/** An advance cannot exceed this percentage of the employee's current total GP fund balance. */
+export const GP_FUND_ADVANCE_MAX_PERCENTAGE_OF_BALANCE = 80;
+
+/** GP fund year runs July -> June; the annual markup is calculated and posted at that year's June close. */
+export const GP_FUND_FISCAL_YEAR_START_MONTH = 7;
+export const GP_FUND_FISCAL_YEAR_CLOSE_MONTH = 6;
+
+/** Maps a calendar month/year to the GP fund fiscal year it belongs to (named after its starting July). */
+export function getGpFundFiscalYear(month: number, year: number): number {
+  return month >= GP_FUND_FISCAL_YEAR_START_MONTH ? year : year - 1;
+}
+
 export interface GpFundMarkupRates {
-  monthlyMarkupRate: number;
   annualMarkupRate: number;
 }
 
@@ -49,14 +60,6 @@ export function resolveGpFundAmount(
   return { scaleCode, subscriptionValue, amount };
 }
 
-export function calculateMonthlyMarkupAmount(
-  baseAmount: number,
-  monthlyMarkupRate: number,
-): number {
-  if (baseAmount <= 0 || monthlyMarkupRate <= 0) return 0;
-  return roundAmount(baseAmount * monthlyMarkupRate / 100);
-}
-
 export function calculateAnnualMarkupAmount(
   yearSubtotal: number,
   annualMarkupRate: number,
@@ -67,21 +70,15 @@ export function calculateAnnualMarkupAmount(
 
 export function buildGpFundBreakdown(
   base: { scaleCode: string | null; subscriptionValue: number; amount: number },
-  markupRates: GpFundMarkupRates,
   annualMarkupAmount = 0,
 ): GpFundAmountBreakdown {
-  const monthlyMarkupAmount = calculateMonthlyMarkupAmount(
-    base.amount,
-    markupRates.monthlyMarkupRate,
-  );
-
   return {
     scaleCode: base.scaleCode,
     subscriptionValue: base.subscriptionValue,
     baseAmount: base.amount,
-    monthlyMarkupAmount,
+    monthlyMarkupAmount: 0,
     annualMarkupAmount: roundAmount(annualMarkupAmount),
-    totalAmount: roundAmount(base.amount + monthlyMarkupAmount + annualMarkupAmount),
+    totalAmount: roundAmount(base.amount + annualMarkupAmount),
   };
 }
 

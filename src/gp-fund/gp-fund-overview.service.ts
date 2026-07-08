@@ -37,13 +37,11 @@ export class GpFundOverviewService {
       employeeCount: 0,
       enrolledEmployeeCount: 0,
       totalBaseCollected: 0,
-      totalMonthlyMarkup: 0,
       totalAnnualMarkup: 0,
       totalAdvanceInstallments: 0,
       totalCollected: 0,
       avgMonthlyContribution: 0,
       scaleCount: 0,
-      monthlyMarkupRate: markupRates.monthlyMarkupRate,
       annualMarkupRate: markupRates.annualMarkupRate,
     };
 
@@ -54,7 +52,6 @@ export class GpFundOverviewService {
       payrollCount: number;
       employeeCount: Set<number>;
       totalBaseCollected: number;
-      totalMonthlyMarkup: number;
       totalAnnualMarkup: number;
       totalCollected: number;
     }>();
@@ -64,7 +61,6 @@ export class GpFundOverviewService {
       payrollCount: number;
       employeeCount: Set<number>;
       totalBaseCollected: number;
-      totalMonthlyMarkup: number;
       totalAnnualMarkup: number;
       totalCollected: number;
     }>();
@@ -75,7 +71,6 @@ export class GpFundOverviewService {
       payrollCount: number;
       employeeCount: Set<number>;
       totalBaseCollected: number;
-      totalMonthlyMarkup: number;
       totalAnnualMarkup: number;
       totalCollected: number;
     }>();
@@ -89,7 +84,6 @@ export class GpFundOverviewService {
       subscriptionValue: number;
       payrollCount: number;
       totalBaseCollected: number;
-      totalMonthlyMarkup: number;
       totalAnnualMarkup: number;
       totalCollected: number;
     }>();
@@ -109,7 +103,6 @@ export class GpFundOverviewService {
 
       summary.payrollCount += 1;
       summary.totalBaseCollected = roundAmount(summary.totalBaseCollected + breakdown.baseAmount);
-      summary.totalMonthlyMarkup = roundAmount(summary.totalMonthlyMarkup + breakdown.monthlyMarkupAmount);
       summary.totalAnnualMarkup = roundAmount(summary.totalAnnualMarkup + breakdown.annualMarkupAmount);
       summary.totalAdvanceInstallments = roundAmount(
         summary.totalAdvanceInstallments + breakdown.advanceInstallmentAmount,
@@ -126,14 +119,12 @@ export class GpFundOverviewService {
         payrollCount: 0,
         employeeCount: new Set<number>(),
         totalBaseCollected: 0,
-        totalMonthlyMarkup: 0,
         totalAnnualMarkup: 0,
         totalCollected: 0,
       };
       monthEntry.payrollCount += 1;
       monthEntry.employeeCount.add(payroll.employeeId);
       monthEntry.totalBaseCollected = roundAmount(monthEntry.totalBaseCollected + breakdown.baseAmount);
-      monthEntry.totalMonthlyMarkup = roundAmount(monthEntry.totalMonthlyMarkup + breakdown.monthlyMarkupAmount);
       monthEntry.totalAnnualMarkup = roundAmount(monthEntry.totalAnnualMarkup + breakdown.annualMarkupAmount);
       monthEntry.totalCollected = roundAmount(monthEntry.totalCollected + breakdown.totalAmount);
       monthMap.set(monthKey, monthEntry);
@@ -143,14 +134,12 @@ export class GpFundOverviewService {
         payrollCount: 0,
         employeeCount: new Set<number>(),
         totalBaseCollected: 0,
-        totalMonthlyMarkup: 0,
         totalAnnualMarkup: 0,
         totalCollected: 0,
       };
       yearEntry.payrollCount += 1;
       yearEntry.employeeCount.add(payroll.employeeId);
       yearEntry.totalBaseCollected = roundAmount(yearEntry.totalBaseCollected + breakdown.baseAmount);
-      yearEntry.totalMonthlyMarkup = roundAmount(yearEntry.totalMonthlyMarkup + breakdown.monthlyMarkupAmount);
       yearEntry.totalAnnualMarkup = roundAmount(yearEntry.totalAnnualMarkup + breakdown.annualMarkupAmount);
       yearEntry.totalCollected = roundAmount(yearEntry.totalCollected + breakdown.totalAmount);
       yearMap.set(payroll.year, yearEntry);
@@ -162,14 +151,12 @@ export class GpFundOverviewService {
           payrollCount: 0,
           employeeCount: new Set<number>(),
           totalBaseCollected: 0,
-          totalMonthlyMarkup: 0,
           totalAnnualMarkup: 0,
           totalCollected: 0,
         };
         scaleEntry.payrollCount += 1;
         scaleEntry.employeeCount.add(payroll.employeeId);
         scaleEntry.totalBaseCollected = roundAmount(scaleEntry.totalBaseCollected + breakdown.baseAmount);
-        scaleEntry.totalMonthlyMarkup = roundAmount(scaleEntry.totalMonthlyMarkup + breakdown.monthlyMarkupAmount);
         scaleEntry.totalAnnualMarkup = roundAmount(scaleEntry.totalAnnualMarkup + breakdown.annualMarkupAmount);
         scaleEntry.totalCollected = roundAmount(scaleEntry.totalCollected + breakdown.totalAmount);
         scaleUsageMap.set(breakdown.scaleCode, scaleEntry);
@@ -185,13 +172,11 @@ export class GpFundOverviewService {
           subscriptionValue: breakdown.subscriptionValue,
           payrollCount: 0,
           totalBaseCollected: 0,
-          totalMonthlyMarkup: 0,
           totalAnnualMarkup: 0,
           totalCollected: 0,
         };
         empEntry.payrollCount += 1;
         empEntry.totalBaseCollected = roundAmount(empEntry.totalBaseCollected + breakdown.baseAmount);
-        empEntry.totalMonthlyMarkup = roundAmount(empEntry.totalMonthlyMarkup + breakdown.monthlyMarkupAmount);
         empEntry.totalAnnualMarkup = roundAmount(empEntry.totalAnnualMarkup + breakdown.annualMarkupAmount);
         empEntry.totalCollected = roundAmount(empEntry.totalCollected + breakdown.totalAmount);
         employeeMap.set(payroll.employeeId, empEntry);
@@ -213,7 +198,6 @@ export class GpFundOverviewService {
         payrollCount: entry.payrollCount,
         employeeCount: entry.employeeCount.size,
         totalBaseCollected: entry.totalBaseCollected,
-        totalMonthlyMarkup: entry.totalMonthlyMarkup,
         totalAnnualMarkup: entry.totalAnnualMarkup,
         totalCollected: entry.totalCollected,
       }))
@@ -225,7 +209,6 @@ export class GpFundOverviewService {
         payrollCount: entry.payrollCount,
         employeeCount: entry.employeeCount.size,
         totalBaseCollected: entry.totalBaseCollected,
-        totalMonthlyMarkup: entry.totalMonthlyMarkup,
         totalAnnualMarkup: entry.totalAnnualMarkup,
         totalCollected: entry.totalCollected,
       }))
@@ -238,7 +221,6 @@ export class GpFundOverviewService {
         payrollCount: entry.payrollCount,
         employeeCount: entry.employeeCount.size,
         totalBaseCollected: entry.totalBaseCollected,
-        totalMonthlyMarkup: entry.totalMonthlyMarkup,
         totalAnnualMarkup: entry.totalAnnualMarkup,
         totalCollected: entry.totalCollected,
       }))
@@ -304,10 +286,8 @@ export class GpFundOverviewService {
     return {
       totalCollected: overview.summary.totalCollected,
       totalBaseCollected: overview.summary.totalBaseCollected,
-      totalMonthlyMarkup: overview.summary.totalMonthlyMarkup,
       totalAnnualMarkup: overview.summary.totalAnnualMarkup,
       totalAdvanceInstallments: overview.summary.totalAdvanceInstallments,
-      monthlyMarkupRate: overview.summary.monthlyMarkupRate,
       annualMarkupRate: overview.summary.annualMarkupRate,
       advances: overview.advances,
       enrolledEmployees: overview.summary.enrolledEmployeeCount,
