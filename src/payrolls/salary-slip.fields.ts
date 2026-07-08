@@ -37,6 +37,8 @@ export const SALARY_SLIP_ALLOWANCE_FIELDS: SalarySlipFieldDef[] = [
   { label: 'Integrated Allowance', getValue: (e) => e.integratedAllowance },
   { label: 'Washing Allowance', getValue: (e) => e.wa },
   { label: 'Computer Allowance', getValue: (e) => e.computerAllowance },
+  { label: 'Welfare Allowance', getValue: (e) => e.welfareAllowance },
+  { label: 'Management Allowance', getValue: (e) => e.managementAllowance },
   { label: 'Special Allowance', getValue: (e) => e.specialAllowance },
   { label: 'Arrears (If any)', getValue: (e) => e.arrears },
 ];

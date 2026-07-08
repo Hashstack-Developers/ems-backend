@@ -31,6 +31,7 @@ export interface GpFundSlipTableRow {
   subscriptionPerMonth: number;
   tenure: string;
   closingBalance: number;
+  yearlyCollection: number;
   currentBalance: number;
   collectionRate: string;
   markupAmount: number;
@@ -241,6 +242,7 @@ function buildFundTableRows(
       subscriptionPerMonth: roundAmount(contrib.subscriptionValue),
       tenure: contrib.label,
       closingBalance,
+      yearlyCollection: baseAmount,
       currentBalance,
       collectionRate,
       markupAmount,

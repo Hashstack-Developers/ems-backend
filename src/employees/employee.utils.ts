@@ -73,6 +73,7 @@ export function computeRetirementDate(dateOfBirth: string): string {
   const dob = new Date(dateOfBirth);
   const retirement = new Date(dob);
   retirement.setFullYear(retirement.getFullYear() + 60);
+  retirement.setDate(retirement.getDate() - 1);
   return retirement.toISOString().slice(0, 10);
 }
 

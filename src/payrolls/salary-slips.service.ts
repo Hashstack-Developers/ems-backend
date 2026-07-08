@@ -30,6 +30,7 @@ export interface SalarySlipAvailability {
   employeeId: number;
   employeeCode: string;
   fullName: string;
+  fatherName: string;
   stage: string;
   designation: string;
   payrollId: number | null;
@@ -82,6 +83,7 @@ export class SalarySlipsService {
         employeeId: emp.id,
         employeeCode: emp.employeeCode,
         fullName: emp.name,
+        fatherName: emp.fatherName ?? '',
         stage: emp.stage ?? '',
         designation: emp.designation,
         payrollId: payroll?.id ?? null,

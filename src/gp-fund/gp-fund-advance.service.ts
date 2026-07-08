@@ -395,6 +395,7 @@ export class GpFundAdvanceService {
       employeeId: advance.employeeId,
       employeeCode: advance.employee?.employeeCode ?? '',
       name: advance.employee?.name ?? '',
+      fatherName: advance.employee?.fatherName ?? '',
       designation: advance.employee?.designation ?? '',
       gpFundScale: advance.employee?.gpFund ?? null,
       advanceAmount: roundAmount(advance.advanceAmount),

@@ -163,6 +163,12 @@ export class Employee {
   @Column(salaryColumn('computer_allowance'))
   computerAllowance: number | null;
 
+  @Column(salaryColumn('welfare_allowance'))
+  welfareAllowance: number | null;
+
+  @Column(salaryColumn('management_allowance'))
+  managementAllowance: number | null;
+
   @Column(salaryColumn('special_allowance'))
   specialAllowance: number | null;
 

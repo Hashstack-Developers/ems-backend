@@ -32,6 +32,7 @@ export interface GpFundReportAvailability {
   employeeId: number;
   employeeCode: string;
   fullName: string;
+  fatherName: string;
   stage: string;
   designation: string;
   gpFundScale: string | null;
@@ -76,6 +77,7 @@ export class GpFundReportsService {
         employeeId: employee.id,
         employeeCode: employee.employeeCode,
         fullName: employee.name,
+        fatherName: employee.fatherName ?? '',
         stage: employee.stage ?? '',
         designation: employee.designation,
         gpFundScale: employee.gpFund ?? stats?.gpFundScale ?? null,
@@ -330,12 +332,13 @@ export class GpFundReportsService {
         doc.y = infoStartY + Math.ceil(Math.max(infoRows.length, 1) / 3) * 26 + 10;
 
         const columns: Array<{ label: string; width: number; align: 'left' | 'right' | 'center' }> = [
-          { label: 'Sr.\nNo.', width: pageWidth * 0.06, align: 'center' },
-          { label: 'Subscription of\nGP Fund per Month', width: pageWidth * 0.10, align: 'right' },
-          { label: 'Tenure', width: pageWidth * 0.19, align: 'left' },
-          { label: 'Balance\nc/f', width: pageWidth * 0.10, align: 'right' },
-          { label: 'Collection\nof GP Fund', width: pageWidth * 0.11, align: 'right' },
-          { label: 'Mark-up Rate\nper Anum', width: pageWidth * 0.12, align: 'right' },
+          { label: 'Sr.\nNo.', width: pageWidth * 0.05, align: 'center' },
+          { label: 'Subscription of\nGP Fund per Month', width: pageWidth * 0.09, align: 'right' },
+          { label: 'Tenure', width: pageWidth * 0.17, align: 'left' },
+          { label: 'Balance\nc/f', width: pageWidth * 0.09, align: 'right' },
+          { label: 'Yearly\nCollection', width: pageWidth * 0.09, align: 'right' },
+          { label: 'Collection\nof GP Fund', width: pageWidth * 0.09, align: 'right' },
+          { label: 'Mark-up Rate\nper Anum', width: pageWidth * 0.10, align: 'right' },
           { label: 'GP Fund\nincluding Mark-up', width: pageWidth * 0.12, align: 'right' },
           { label: 'Total Balance\n(Inclusive Mark-UP)', width: pageWidth * 0.20, align: 'right' },
         ];
@@ -366,7 +369,7 @@ export class GpFundReportsService {
         };
 
         if (report.fundTableRows.length === 0) {
-          drawFundRow(['', '', 'No contributions in selected period', '', '', '', '', '']);
+          drawFundRow(['', '', 'No contributions in selected period', '', '', '', '', '', '']);
         } else {
           for (const row of report.fundTableRows) {
             drawFundRow([
@@ -374,6 +377,7 @@ export class GpFundReportsService {
               formatAmount(row.subscriptionPerMonth),
               row.tenure,
               formatAmount(row.closingBalance),
+              formatAmount(row.yearlyCollection),
               formatAmount(row.currentBalance),
               row.collectionRate,
               formatAmount(row.markupAmount),
@@ -409,8 +413,8 @@ export class GpFundReportsService {
         });
         y += loanHeight;
 
-        const totalLabelW = columns.slice(0, 6).reduce((sum, col) => sum + col.width, 0);
-        const totalValueW = columns.slice(6).reduce((sum, col) => sum + col.width, 0);
+        const totalLabelW = columns.slice(0, 7).reduce((sum, col) => sum + col.width, 0);
+        const totalValueW = columns.slice(7).reduce((sum, col) => sum + col.width, 0);
         const totalHeight = 20;
         this.drawTableCell(doc, 'Total GPF Balance', left, y, totalLabelW, totalHeight, {
           bold: true,
