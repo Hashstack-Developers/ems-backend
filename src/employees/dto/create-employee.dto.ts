@@ -219,6 +219,16 @@ export class CreateEmployeeDto {
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  welfareAllowance?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  managementAllowance?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   socialSecurityBenefit?: number;
 
   @IsOptional()
