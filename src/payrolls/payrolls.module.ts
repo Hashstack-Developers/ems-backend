@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { EmployeesModule } from '../employees/employees.module';
 import { GpFundModule } from '../gp-fund/gp-fund.module';
 import { TaxSlabsModule } from '../tax-slabs/tax-slabs.module';
+import { AllowancesModule } from '../allowances/allowances.module';
+import { PensionModule } from '../pension/pension.module';
 import { PayrollDeduction } from './entities/payroll-deduction.entity';
 import { Payroll } from './entities/payroll.entity';
 import { PayrollsController } from './payrolls.controller';
@@ -16,6 +18,8 @@ import { SalarySlipsService } from './salary-slips.service';
     EmployeesModule,
     TaxSlabsModule,
     GpFundModule,
+    AllowancesModule,
+    PensionModule,
   ],
   controllers: [PayrollsController, SalarySlipsController],
   providers: [

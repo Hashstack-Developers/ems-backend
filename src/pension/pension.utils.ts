@@ -1,0 +1,1 @@
+export const PENSION_DEDUCTION_CODE = 'PENSION';

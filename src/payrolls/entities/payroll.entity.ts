@@ -57,6 +57,15 @@ export class Payroll {
   @Column({ name: 'net_salary', type: 'decimal', precision: 12, scale: 2 })
   netSalary: number;
 
+  @Column({ name: 'welfare_allowance_amount', type: 'decimal', precision: 12, scale: 2, default: 0 })
+  welfareAllowanceAmount: number;
+
+  @Column({ name: 'management_allowance_amount', type: 'decimal', precision: 12, scale: 2, default: 0 })
+  managementAllowanceAmount: number;
+
+  @Column({ name: 'pension_amount', type: 'decimal', precision: 12, scale: 2, default: 0 })
+  pensionAmount: number;
+
   @Column({ name: 'tax_slab_id', type: 'int', nullable: true })
   taxSlabId: number | null;
 

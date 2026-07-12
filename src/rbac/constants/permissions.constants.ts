@@ -44,6 +44,13 @@ export const PERMISSION_DEFINITIONS: readonly PermissionDefinition[] = [
   { key: 'gpFund.generate', module: 'gpFund', action: 'generate', description: 'Generate GP fund reports' },
   { key: 'gpFund.export', module: 'gpFund', action: 'export', description: 'Export GP fund report PDFs' },
 
+  { key: 'allowances.view', module: 'allowances', action: 'view', description: 'View allowances overview and settings' },
+  { key: 'allowances.update', module: 'allowances', action: 'update', description: 'Update allowance default rates' },
+
+  { key: 'pension.view', module: 'pension', action: 'view', description: 'View pension enrollments and overview' },
+  { key: 'pension.update', module: 'pension', action: 'update', description: 'Update pension default rates' },
+  { key: 'pension.manage', module: 'pension', action: 'create', description: 'Enroll and manage employee pension contributions' },
+
   { key: 'reports.view', module: 'reports', action: 'view', description: 'View reports' },
   { key: 'reports.export', module: 'reports', action: 'export', description: 'Export reports' },
 

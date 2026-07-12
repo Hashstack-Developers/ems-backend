@@ -23,6 +23,11 @@ export enum DisabilityStatus {
   YES = 'yes',
 }
 
+export enum EmployeeType {
+  EMPLOYEE = 'employee',
+  EMPLOYER = 'employer',
+}
+
 const salaryColumn = (name: string) => ({
   name,
   type: 'decimal' as const,
@@ -84,6 +89,14 @@ export class Employee {
     nullable: true,
   })
   employmentType: EmploymentType | null;
+
+  @Column({
+    name: 'employee_type',
+    type: 'enum',
+    enum: EmployeeType,
+    default: EmployeeType.EMPLOYEE,
+  })
+  employeeType: EmployeeType;
 
   @Column({ name: 'date_of_regularization', type: 'date', nullable: true })
   dateOfRegularization: string | null;

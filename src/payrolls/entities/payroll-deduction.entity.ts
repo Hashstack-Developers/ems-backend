@@ -12,6 +12,7 @@ export enum DeductionCategory {
   INCOME_TAX = 'income_tax',
   SUB_TAX = 'sub_tax',
   GP_FUND = 'gp_fund',
+  PENSION = 'pension',
 }
 
 export enum DeductionCalculationType {

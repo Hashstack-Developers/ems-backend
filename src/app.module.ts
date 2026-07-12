@@ -23,7 +23,12 @@ import { Role } from './rbac/entities/role.entity';
 import { RbacModule } from './rbac/rbac.module';
 import { User } from './users/entities/user.entity';
 import { UsersModule } from './users/users.module';
+import { AllowancesModule } from './allowances/allowances.module';
+import { AllowanceSettings } from './allowances/entities/allowance-settings.entity';
 import { MailModule } from './mail/mail.module';
+import { PensionModule } from './pension/pension.module';
+import { PensionSettings } from './pension/entities/pension-settings.entity';
+import { PensionEnrollment } from './pension/entities/pension-enrollment.entity';
 
 @Module({
   imports: [
@@ -54,6 +59,9 @@ import { MailModule } from './mail/mail.module';
           GpFundAdvance,
           GpFundAdvancePayment,
           GpFundScale,
+          AllowanceSettings,
+          PensionSettings,
+          PensionEnrollment,
         ],
         synchronize: true,
         logging: configService.get<string>('NODE_ENV') === 'development',
@@ -69,6 +77,8 @@ import { MailModule } from './mail/mail.module';
     TaxSlabsModule,
     PayrollsModule,
     GpFundModule,
+    AllowancesModule,
+    PensionModule,
     DashboardModule,
     ReportsModule,
   ],

@@ -23,6 +23,14 @@ export const MODULES = {
     label: 'GP Fund',
     navKey: 'gpFund',
   },
+  allowances: {
+    label: 'Allowances',
+    navKey: 'allowances',
+  },
+  pension: {
+    label: 'Pension',
+    navKey: 'pension',
+  },
   reports: {
     label: 'Reports',
     navKey: 'reports',
@@ -50,6 +58,8 @@ export const MODULE_NAV_PERMISSION: Record<ModuleKey, string> = {
   salarySlips: 'salarySlips.view',
   taxes: 'taxes.view',
   gpFund: 'gpFund.view',
+  allowances: 'allowances.view',
+  pension: 'pension.view',
   reports: 'reports.view',
   settings: 'settings.view',
   users: 'users.view',

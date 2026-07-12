@@ -1,7 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
-import type { Transporter } from 'nodemailer';
+import { Resend } from 'resend';
 
 export interface SalarySlipMailPayload {
   to: string;
@@ -18,47 +17,43 @@ export interface SalarySlipMailPayload {
 @Injectable()
 export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
-  private transporter: Transporter | null = null;
-  private readonly enabled: boolean;
+  private resend: Resend | null = null;
+  private readonly apiKey: string | undefined;
+  private readonly fromAddress: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.enabled =
-      !!this.configService.get<string>('MAIL_USER') &&
-      !!this.configService.get<string>('MAIL_PASS');
+    this.apiKey = this.configService.get<string>('RESEND_API_KEY');
+    const fromName = this.configService.get<string>('MAIL_FROM_NAME') ?? 'EMS Payroll';
+    const fromEmail = this.configService.get<string>('MAIL_FROM_ADDRESS') ?? 'noreply@yourdomain.com';
+    this.fromAddress = `${fromName} <${fromEmail}>`;
   }
 
   onModuleInit() {
-    if (!this.enabled) {
-      this.logger.warn('Mail not configured — set MAIL_USER and MAIL_PASS in .env to enable salary slip emails');
+    if (!this.apiKey) {
+      this.logger.warn(
+        '[MAIL] Not configured — RESEND_API_KEY missing in environment. Salary slip emails are DISABLED.',
+      );
       return;
     }
 
-    this.transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false,
-      auth: {
-        user: this.configService.get<string>('MAIL_USER'),
-        pass: this.configService.get<string>('MAIL_PASS'),
-      },
-    });
-
-    this.logger.log(`Mail service ready (${this.configService.get<string>('MAIL_USER')})`);
+    this.resend = new Resend(this.apiKey);
+    this.logger.log(`[MAIL] Resend configured. From: ${this.fromAddress}`);
   }
 
   isEnabled(): boolean {
-    return this.enabled && this.transporter !== null;
+    return !!this.resend;
   }
 
   async sendSalarySlip(payload: SalarySlipMailPayload): Promise<void> {
-    if (!this.isEnabled()) return;
+    if (!this.resend) {
+      this.logger.warn(`[MAIL] sendSalarySlip skipped — mail not enabled (to: ${payload.to})`);
+      return;
+    }
 
-    const fromName =
-      this.configService.get<string>('MAIL_FROM_NAME') ?? 'EMS Payroll';
-    const from = `"${fromName}" <${this.configService.get<string>('MAIL_USER')}>`;
+    this.logger.log(`[MAIL] Sending salary slip to ${payload.to} (${payload.employeeCode}) for ${payload.monthLabel}`);
 
-    await this.transporter!.sendMail({
-      from,
+    const { data, error } = await this.resend.emails.send({
+      from: this.fromAddress,
       to: payload.to,
       subject: `Salary Slip — ${payload.monthLabel} | ${payload.employeeName}`,
       html: this.buildHtml(payload),
@@ -66,10 +61,15 @@ export class MailService implements OnModuleInit {
         {
           filename: payload.filename,
           content: payload.pdfBuffer,
-          contentType: 'application/pdf',
         },
       ],
     });
+
+    if (error) {
+      throw new Error(`Resend API error: ${error.message}`);
+    }
+
+    this.logger.log(`[MAIL] Email accepted by Resend — id: ${data?.id}`);
   }
 
   private buildHtml(payload: SalarySlipMailPayload): string {

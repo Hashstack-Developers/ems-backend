@@ -9,11 +9,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EmployeesService } from '../employees/employees.service';
 import { computePayrollGross, getEmployeeFullName } from '../employees/employee.utils';
-import { Employee, EmployeeStatus } from '../employees/entities/employee.entity';
+import { Employee, EmployeeStatus, EmployeeType } from '../employees/entities/employee.entity';
 import { GP_FUND_ANNUAL_MARKUP_CODE, GP_FUND_ADVANCE_CODE, GP_FUND_DEDUCTION_CODE } from '../gp-fund/gp-fund.utils';
 import { GpFundAdvanceService } from '../gp-fund/gp-fund-advance.service';
 import { GpFundService } from '../gp-fund/gp-fund.service';
 import { MailService } from '../mail/mail.service';
+import { AllowanceSettingsService } from '../allowances/allowance-settings.service';
 import { TaxSlabsService } from '../tax-slabs/tax-slabs.service';
 import { GeneratePayrollDto } from './dto/generate-payroll.dto';
 import {
@@ -24,6 +25,9 @@ import {
 import { SubTaxType } from '../tax-slabs/entities/sub-tax.entity';
 import { Payroll, PayrollStatus } from './entities/payroll.entity';
 import { SalarySlipsService } from './salary-slips.service';
+import { PensionEnrollmentService } from '../pension/pension-enrollment.service';
+import { PensionSettingsService } from '../pension/pension-settings.service';
+import { PENSION_DEDUCTION_CODE } from '../pension/pension.utils';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -84,6 +88,9 @@ export class PayrollsService {
     private readonly gpFundAdvanceService: GpFundAdvanceService,
     private readonly salarySlipsService: SalarySlipsService,
     private readonly mailService: MailService,
+    private readonly allowanceSettingsService: AllowanceSettingsService,
+    private readonly pensionEnrollmentService: PensionEnrollmentService,
+    private readonly pensionSettingsService: PensionSettingsService,
   ) {}
 
   async generate(dto: GeneratePayrollDto): Promise<PayrollGenerationResult> {
@@ -179,7 +186,12 @@ export class PayrollsService {
   }
 
   private sendPayrollEmails(payrolls: Payroll[], month: number, year: number): void {
-    if (!this.mailService.isEnabled() || payrolls.length === 0) return;
+    if (!this.mailService.isEnabled()) {
+      this.logger.warn('[MAIL] Email sending skipped — mail service not enabled');
+      return;
+    }
+    if (payrolls.length === 0) return;
+    this.logger.log(`[MAIL] Queuing salary slip emails for ${payrolls.length} payroll(s)`);
 
     const monthLabel = `${MONTH_NAMES[month - 1]} ${year}`;
 
@@ -436,8 +448,35 @@ export class PayrollsService {
     const totalGpFundDeductions = roundAmount(
       gpFund.totalAmount + (advanceInstallment?.amount ?? 0),
     );
-    const totalDeductions = roundAmount(taxResult.totalDeductions + totalGpFundDeductions);
-    const netSalary = roundAmount(payableGross - totalDeductions);
+
+    const allowanceSettings = await this.allowanceSettingsService.getSettings();
+    const { welfareRate, managementRate } = this.allowanceSettingsService.resolveRates(
+      allowanceSettings,
+      employee.welfareAllowance,
+      employee.managementAllowance,
+    );
+    const basicPayForAllowance = Number(employee.basicPayDec2025 ?? 0);
+    const { welfareAmount, managementAmount } = this.allowanceSettingsService.computeAmounts(
+      basicPayForAllowance,
+      welfareRate,
+      managementRate,
+    );
+
+    const pensionEnrollment = await this.pensionEnrollmentService.getActiveEnrollment(employee.id);
+    const pensionSettings = await this.pensionSettingsService.getSettings();
+    const pensionRate = pensionEnrollment
+      ? (employee.employeeType === EmployeeType.EMPLOYER
+          ? Number(pensionSettings.employerRate)
+          : Number(pensionSettings.employeeRate))
+      : 0;
+    const basicPayForPension = Number(employee.basicPayDec2025 ?? 0);
+    const pensionAmount = pensionEnrollment && pensionRate > 0
+      ? this.pensionSettingsService.computePensionAmount(basicPayForPension, pensionRate)
+      : 0;
+
+    const totalDeductions = roundAmount(taxResult.totalDeductions + totalGpFundDeductions + pensionAmount);
+
+    const netSalary = roundAmount(payableGross - totalDeductions + welfareAmount + managementAmount);
 
     const payroll = this.payrollsRepository.create({
       employeeId: employee.id,
@@ -449,6 +488,9 @@ export class PayrollsService {
       incomeTax: roundAmount(taxResult.incomeTax),
       totalDeductions,
       netSalary,
+      welfareAllowanceAmount: welfareAmount,
+      managementAllowanceAmount: managementAmount,
+      pensionAmount,
       taxSlabId: taxResult.taxSlab?.id ?? null,
       taxSlabName: taxResult.taxSlab?.name ?? 'No applicable slab',
       appliedTaxRate: taxResult.taxSlab?.taxRate != null
@@ -554,6 +596,20 @@ export class PayrollsService {
         calculationType: DeductionCalculationType.FIXED,
         appliedRate: null,
         appliedFixedAmount: advanceInstallment.monthlyInstallment,
+        sourceSubTaxId: null,
+      });
+    }
+
+    if (pensionAmount > 0 && pensionEnrollment) {
+      deductions.push({
+        payrollId: savedPayroll.id,
+        name: 'Pension Contribution',
+        code: PENSION_DEDUCTION_CODE,
+        category: DeductionCategory.PENSION,
+        amount: pensionAmount,
+        calculationType: DeductionCalculationType.PERCENTAGE,
+        appliedRate: pensionRate,
+        appliedFixedAmount: null,
         sourceSubTaxId: null,
       });
     }

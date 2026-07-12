@@ -10,7 +10,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { EmploymentType, EmployeeStatus, DisabilityStatus } from '../entities/employee.entity';
+import { EmploymentType, EmployeeStatus, DisabilityStatus, EmployeeType } from '../entities/employee.entity';
 
 export class CreateEmployeeDto {
   @IsOptional()
@@ -319,4 +319,8 @@ export class CreateEmployeeDto {
   @IsOptional()
   @IsEnum(EmployeeStatus)
   status?: EmployeeStatus;
+
+  @IsOptional()
+  @IsEnum(EmployeeType)
+  employeeType?: EmployeeType;
 }

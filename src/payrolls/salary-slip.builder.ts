@@ -162,12 +162,17 @@ function allowanceLine(
   return { label, amount: roundAmount(value) };
 }
 
-function buildAllowances(employee: Employee): SalarySlipLineItem[] {
+function buildAllowances(employee: Employee, payroll: Payroll): SalarySlipLineItem[] {
   const lines = SALARY_SLIP_ALLOWANCE_FIELDS.map((field) => {
     const raw = field.getValue(employee);
     const value = typeof raw === 'number' ? raw : parseAmount(raw);
     return allowanceLine(field.label, value);
   }).filter((line): line is SalarySlipLineItem => line != null);
+
+  const welfareAmt = roundAmount(payroll.welfareAllowanceAmount ?? 0);
+  const mgmtAmt = roundAmount(payroll.managementAllowanceAmount ?? 0);
+  if (welfareAmt > 0) lines.push({ label: 'Welfare Allowance', amount: welfareAmt });
+  if (mgmtAmt > 0) lines.push({ label: 'Management Allowance', amount: mgmtAmt });
 
   if (lines.length === 0 && parseAmount(employee.grossSalary) > 0) {
     lines.push({ label: 'Gross Salary', amount: roundAmount(employee.grossSalary) });
@@ -271,7 +276,7 @@ export function buildSalarySlipPayload(
   const emp = payroll.employee;
   const monthLabel = MONTH_NAMES[payroll.month - 1];
   const deductions = payroll.deductions ?? [];
-  const allowances = buildAllowances(emp);
+  const allowances = buildAllowances(emp, payroll);
   const allowanceTotal = sumLines(allowances);
   const grossDisplay = allowanceTotal > 0 ? allowanceTotal : roundAmount(payroll.grossSalary);
 
