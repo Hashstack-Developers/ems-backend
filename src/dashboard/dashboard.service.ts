@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { EmployeesService } from '../employees/employees.service';
 import { GpFundOverviewService } from '../gp-fund/gp-fund-overview.service';
 import { PayrollsService } from '../payrolls/payrolls.service';
+import { PensionOverviewService } from '../pension/pension-overview.service';
 import { TaxOverviewService } from '../tax-slabs/tax-overview.service';
 import { TaxSlabsService } from '../tax-slabs/tax-slabs.service';
 
@@ -18,6 +19,7 @@ export class DashboardService {
     private readonly taxSlabsService: TaxSlabsService,
     private readonly taxOverviewService: TaxOverviewService,
     private readonly gpFundOverviewService: GpFundOverviewService,
+    private readonly pensionOverviewService: PensionOverviewService,
   ) {}
 
   async getStats() {
@@ -29,6 +31,7 @@ export class DashboardService {
       payrollByMonth,
       taxCollection,
       gpFund,
+      pension,
     ] = await Promise.all([
       this.employeesService.count(),
       this.employeesService.countActive(),
@@ -37,6 +40,7 @@ export class DashboardService {
       this.payrollsService.getMonthlySummaries(),
       this.taxOverviewService.getDashboardSummary(),
       this.gpFundOverviewService.getDashboardSummary(),
+      this.pensionOverviewService.getDashboardSummary(),
     ]);
 
     const payrollTotals = payrollByMonth.reduce(
@@ -89,6 +93,7 @@ export class DashboardService {
       },
       taxCollection,
       gpFund,
+      pension,
       combined: {
         totalTaxDeductions,
         totalGpFund,

@@ -10,6 +10,7 @@ import { getEmployeeFullName } from '../employees/employee.utils';
 import { GpFundOverviewService } from '../gp-fund/gp-fund-overview.service';
 import { Payroll } from '../payrolls/entities/payroll.entity';
 import { PayrollsService } from '../payrolls/payrolls.service';
+import { PensionOverviewService } from '../pension/pension-overview.service';
 import { SALARY_SLIP_BANK, SALARY_SLIP_LOGOS } from '../payrolls/salary-slip.constants';
 import { SALARY_SLIP_ALLOWANCE_FIELDS } from '../payrolls/salary-slip.fields';
 import { TaxSlabsService } from '../tax-slabs/tax-slabs.service';
@@ -20,7 +21,7 @@ import {
   GP_FUND_MONTHLY_MARKUP_CODE,
 } from '../gp-fund/gp-fund.utils';
 
-export type ReportType = 'employees' | 'payrolls' | 'taxes' | 'gpFund';
+export type ReportType = 'employees' | 'payrolls' | 'taxes' | 'gpFund' | 'pension';
 export type ReportFormat = 'csv' | 'pdf';
 
 const MONTH_NAMES = [
@@ -53,6 +54,7 @@ export class ReportsService {
     private readonly payrollsService: PayrollsService,
     private readonly taxSlabsService: TaxSlabsService,
     private readonly gpFundOverviewService: GpFundOverviewService,
+    private readonly pensionOverviewService: PensionOverviewService,
   ) {}
 
   async generate(
@@ -61,8 +63,8 @@ export class ReportsService {
     month?: number,
     year?: number,
   ): Promise<{ buffer: Buffer; filename: string; contentType: string }> {
-    if (!['employees', 'payrolls', 'taxes', 'gpFund'].includes(type)) {
-      throw new BadRequestException('Invalid report type. Use employees, payrolls, taxes, or gpFund');
+    if (!['employees', 'payrolls', 'taxes', 'gpFund', 'pension'].includes(type)) {
+      throw new BadRequestException('Invalid report type. Use employees, payrolls, taxes, gpFund, or pension');
     }
     if (!['csv', 'pdf'].includes(format)) {
       throw new BadRequestException('Invalid format. Use csv or pdf');
@@ -251,6 +253,23 @@ export class ReportsService {
         filename = `gp-fund-report-${timestamp}.csv`;
         break;
       }
+      case 'pension': {
+        const years = year ? [year] : undefined;
+        const months = month ? [month] : undefined;
+        const overview = await this.pensionOverviewService.getOverview({ years, months });
+        data = overview.byEmployee.map((emp) => ({
+          'Employee Code': emp.employeeCode,
+          'Employee Name': emp.name,
+          'Designation': emp.designation,
+          'Payroll Count': emp.count,
+          'Total Pension': emp.total,
+        }));
+        if (data.length === 0) {
+          data = [{ 'Message': 'No pension contributions found for the selected period' }];
+        }
+        filename = `pension-report-${timestamp}.csv`;
+        break;
+      }
     }
 
     const parser = new Parser();
@@ -388,6 +407,9 @@ export class ReportsService {
             break;
           case 'gpFund':
             await this.renderGpFundPdf(doc, month, year, periodLabel, genLabel);
+            break;
+          case 'pension':
+            await this.renderPensionPdf(doc, month, year, periodLabel, genLabel);
             break;
         }
 
@@ -1008,6 +1030,166 @@ export class ReportsService {
           fmt(row.totalBaseCollected),
           row.totalAnnualMarkup > 0 ? fmt(row.totalAnnualMarkup) : '—',
           fmt(row.totalCollected),
+        ];
+
+        let mx = left;
+        mVals.forEach((val, ci) => {
+          this.drawTableCell(doc, val, mx, y, mCols[ci].width, mRowH, {
+            fontSize: 7, align: mCols[ci].align, fill,
+          });
+          mx += mCols[ci].width;
+        });
+        y += mRowH;
+      });
+
+      doc.y = y + 6;
+    }
+  }
+
+  // ─── Pension Report ────────────────────────────────────────────────────────
+
+  private async renderPensionPdf(
+    doc: InstanceType<typeof PDFDocument>,
+    month: number | undefined,
+    year: number | undefined,
+    periodLabel: string | undefined,
+    genLabel: string,
+  ) {
+    const years = year ? [year] : undefined;
+    const months = month ? [month] : undefined;
+    const overview = await this.pensionOverviewService.getOverview({ years, months });
+
+    const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const left = doc.page.margins.left;
+    const subtitle = [periodLabel, genLabel].filter(Boolean).join('   |   ');
+    const docTitle = 'PENSION CONTRIBUTION REPORT';
+
+    this.drawPageHeader(doc, docTitle, subtitle);
+
+    // Summary banner
+    const { summary } = overview;
+    const bannerY = doc.y;
+    const bannerH = 28;
+    doc.rect(left, bannerY, pageWidth, bannerH).fill('#e8e8e8');
+    doc.fillColor('#000');
+    const bannerItems = [
+      { label: 'Total Enrolled', value: String(summary.totalEnrollments) },
+      { label: 'Active Enrollments', value: String(summary.activeEnrollments) },
+      { label: 'Employees Contributing', value: String(summary.employeeCount) },
+      { label: 'Payroll Records', value: String(summary.payrollCount) },
+      { label: 'Total Pension Deducted', value: fmt(summary.totalPension) },
+    ];
+    const bColW = pageWidth / bannerItems.length;
+    bannerItems.forEach(({ label, value }, i) => {
+      const x = left + i * bColW;
+      doc.font('Helvetica-Bold').fontSize(6).text(label, x + 4, bannerY + 5, { width: bColW - 8 });
+      doc.font('Helvetica-Bold').fontSize(8).text(value, x + 4, bannerY + 15, { width: bColW - 8 });
+    });
+    doc.y = bannerY + bannerH + 6;
+
+    if (overview.byEmployee.length === 0) {
+      doc.font('Helvetica').fontSize(10).text('No pension contributions found for this period.', left, doc.y);
+      return;
+    }
+
+    // By-employee table
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#000').text('Contributions by Employee', left, doc.y);
+    doc.moveDown(0.3);
+
+    const cols = [
+      { label: '#', width: pageWidth * 0.05, align: 'center' as const },
+      { label: 'Employee', width: pageWidth * 0.28, align: 'left' as const },
+      { label: 'Designation', width: pageWidth * 0.22, align: 'left' as const },
+      { label: 'Payroll Count', width: pageWidth * 0.12, align: 'center' as const },
+      { label: 'Total Pension', width: pageWidth * 0.15, align: 'right' as const },
+    ];
+    const headerH = 22;
+    const rowH = 16;
+
+    const drawHeader = (y: number) => {
+      let x = left;
+      cols.forEach((col) => {
+        this.drawTableCell(doc, col.label, x, y, col.width, headerH, {
+          bold: true, fontSize: 7, align: col.align, fill: '#d0d0d0',
+        });
+        x += col.width;
+      });
+      return y + headerH;
+    };
+
+    let y = drawHeader(doc.y);
+
+    overview.byEmployee.forEach((emp, idx) => {
+      const { y: newY, newPage } = this.checkPageBreak(doc, y, rowH, docTitle, subtitle);
+      y = newPage ? drawHeader(newY) : newY;
+
+      const fill = idx % 2 === 0 ? undefined : '#fafafa';
+      const vals = [
+        String(idx + 1),
+        `${emp.name}\n${emp.employeeCode}`,
+        emp.designation,
+        String(emp.count),
+        fmt(emp.total),
+      ];
+
+      let x = left;
+      vals.forEach((val, ci) => {
+        this.drawTableCell(doc, val, x, y, cols[ci].width, rowH, {
+          fontSize: ci === 1 ? 6 : 7, align: cols[ci].align, fill,
+        });
+        x += cols[ci].width;
+      });
+      y += rowH;
+    });
+
+    // Totals row
+    const totalVals = ['', 'TOTAL', '', '', fmt(summary.totalPension)];
+    let x = left;
+    totalVals.forEach((val, ci) => {
+      this.drawTableCell(doc, val, x, y, cols[ci].width, rowH, {
+        bold: true, fontSize: 7, align: cols[ci].align, fill: '#e8e8e8',
+      });
+      x += cols[ci].width;
+    });
+    doc.y = y + rowH + 10;
+
+    // Monthly breakdown
+    if (overview.byMonth.length > 0) {
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#000').text('Monthly Breakdown', left, doc.y);
+      doc.moveDown(0.3);
+
+      const mCols = [
+        { label: 'Period', width: pageWidth * 0.30, align: 'left' as const },
+        { label: 'Employees', width: pageWidth * 0.20, align: 'center' as const },
+        { label: 'Records', width: pageWidth * 0.15, align: 'center' as const },
+        { label: 'Total Pension', width: pageWidth * 0.20, align: 'right' as const },
+      ];
+      const mHeaderH = 20;
+      const mRowH = 15;
+
+      const drawMHeader = (my: number) => {
+        let mx = left;
+        mCols.forEach((col) => {
+          this.drawTableCell(doc, col.label, mx, my, col.width, mHeaderH, {
+            bold: true, fontSize: 7, align: col.align, fill: '#d0d0d0',
+          });
+          mx += col.width;
+        });
+        return my + mHeaderH;
+      };
+
+      y = drawMHeader(doc.y);
+
+      overview.byMonth.forEach((row, idx) => {
+        const { y: newY, newPage } = this.checkPageBreak(doc, y, mRowH, docTitle, subtitle);
+        y = newPage ? drawMHeader(newY) : newY;
+
+        const fill = idx % 2 === 0 ? undefined : '#fafafa';
+        const mVals = [
+          row.label,
+          String(row.employeeCount),
+          String(row.count),
+          fmt(row.total),
         ];
 
         let mx = left;

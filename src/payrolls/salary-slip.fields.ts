@@ -46,5 +46,6 @@ export const SALARY_SLIP_DEDUCTION_LABELS = {
   incomeTax: 'Income Tax',
   gpFund: 'GP Fund',
   loanAdvance: 'Loan/Advance',
+  pension: 'Pension Contribution',
   other: 'Other',
 } as const;

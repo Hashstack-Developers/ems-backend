@@ -9,6 +9,7 @@ import {
   GP_FUND_DEDUCTION_CODE,
   GP_FUND_MONTHLY_MARKUP_CODE,
 } from '../gp-fund/gp-fund.utils';
+import { PENSION_DEDUCTION_CODE } from '../pension/pension.utils';
 import { Payroll, PayrollStatus } from './entities/payroll.entity';
 import { PayrollDeduction } from './entities/payroll-deduction.entity';
 import { SALARY_SLIP_BANK } from './salary-slip.constants';
@@ -223,11 +224,17 @@ function buildDeductions(
     parseAmount(employee.loanAdvance) + getDeductionAmount(deductions, [GP_FUND_ADVANCE_CODE]),
   );
 
+  const pensionTotal = getDeductionAmount(deductions, [PENSION_DEDUCTION_CODE]);
+
   const lines: SalarySlipLineItem[] = [
     { label: SALARY_SLIP_DEDUCTION_LABELS.incomeTax, amount: totalTax },
     { label: SALARY_SLIP_DEDUCTION_LABELS.gpFund, amount: gpFundTotal },
     { label: SALARY_SLIP_DEDUCTION_LABELS.loanAdvance, amount: loanAdvance },
   ];
+
+  if (pensionTotal > 0) {
+    lines.push({ label: SALARY_SLIP_DEDUCTION_LABELS.pension, amount: pensionTotal });
+  }
 
   const otherDeduction = parseAmount(employee.deduction);
   const tracked = roundAmount(sumLines(lines) + otherDeduction);

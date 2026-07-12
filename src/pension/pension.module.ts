@@ -14,6 +14,6 @@ import { PensionController } from './pension.controller';
   imports: [TypeOrmModule.forFeature([PensionSettings, PensionEnrollment, Payroll, PayrollDeduction, Employee])],
   providers: [PensionSettingsService, PensionEnrollmentService, PensionOverviewService],
   controllers: [PensionController],
-  exports: [PensionSettingsService, PensionEnrollmentService],
+  exports: [PensionSettingsService, PensionEnrollmentService, PensionOverviewService],
 })
 export class PensionModule {}
