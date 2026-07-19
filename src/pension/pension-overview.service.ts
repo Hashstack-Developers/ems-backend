@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Payroll } from '../payrolls/entities/payroll.entity';
 import { PensionEnrollment } from './entities/pension-enrollment.entity';
-import { roundAmount } from '../common/utils/currency.utils';
+import { parseAmount, roundAmount } from '../common/utils/currency.utils';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -22,6 +22,8 @@ export class PensionOverviewService {
     const enrollments = await this.enrollmentRepo.find({ relations: { employee: true } });
 
     let totalPension = 0;
+    let totalEmployeePension = 0;
+    let totalEmployerPension = 0;
     let payrollCount = 0;
     const employeeIds = new Set<number>();
     const monthMap = new Map<string, { year: number; month: number; label: string; total: number; count: number; empIds: Set<number> }>();
@@ -29,12 +31,14 @@ export class PensionOverviewService {
     const empMap = new Map<number, { employeeId: number; employeeCode: string; name: string; designation: string; total: number; count: number }>();
 
     for (const p of payrolls) {
-      const amt = roundAmount(p.pensionAmount ?? 0);
+      const amt = roundAmount(parseAmount(p.pensionAmount) + parseAmount(p.pensionEmployerAmount));
       if (amt <= 0) continue;
 
       payrollCount++;
       employeeIds.add(p.employeeId);
       totalPension = roundAmount(totalPension + amt);
+      totalEmployeePension = roundAmount(totalEmployeePension + parseAmount(p.pensionAmount));
+      totalEmployerPension = roundAmount(totalEmployerPension + parseAmount(p.pensionEmployerAmount));
 
       const mk = `${p.year}-${p.month}`;
       const mEntry = monthMap.get(mk) ?? { year: p.year, month: p.month, label: `${MONTH_NAMES[p.month - 1]} ${p.year}`, total: 0, count: 0, empIds: new Set() };
@@ -60,14 +64,18 @@ export class PensionOverviewService {
     const byMonth = [...monthMap.values()].map((e) => ({ ...e, employeeCount: e.empIds.size, empIds: undefined })).sort((a, b) => a.year === b.year ? a.month - b.month : a.year - b.year);
     const byYear = [...yearMap.values()].map((e) => ({ ...e, employeeCount: e.empIds.size, empIds: undefined })).sort((a, b) => a.year - b.year);
     const byEmployee = [...empMap.values()].sort((a, b) => b.total - a.total);
-    const records = payrolls.filter((p) => roundAmount(p.pensionAmount ?? 0) > 0).map((p) => ({
+    const records = payrolls.filter((p) => roundAmount(parseAmount(p.pensionAmount) + parseAmount(p.pensionEmployerAmount)) > 0).map((p) => ({
       payrollId: p.id, employeeId: p.employeeId, employeeCode: p.employee?.employeeCode ?? '', name: p.employee?.name ?? '',
       designation: p.employee?.designation ?? '', month: p.month, year: p.year,
-      label: `${MONTH_NAMES[p.month - 1]} ${p.year}`, pensionAmount: roundAmount(p.pensionAmount ?? 0), grossSalary: roundAmount(p.grossSalary),
+      label: `${MONTH_NAMES[p.month - 1]} ${p.year}`,
+      pensionAmount: roundAmount(parseAmount(p.pensionAmount)),
+      pensionEmployerAmount: roundAmount(parseAmount(p.pensionEmployerAmount)),
+      totalPension: roundAmount(parseAmount(p.pensionAmount) + parseAmount(p.pensionEmployerAmount)),
+      grossSalary: roundAmount(p.grossSalary),
     }));
 
     return {
-      summary: { payrollCount, employeeCount: employeeIds.size, totalPension, activeEnrollments: enrollments.filter((e) => e.isActive).length, totalEnrollments: enrollments.length },
+      summary: { payrollCount, employeeCount: employeeIds.size, totalPension, totalEmployeePension, totalEmployerPension, activeEnrollments: enrollments.filter((e) => e.isActive).length, totalEnrollments: enrollments.length },
       byMonth, byYear, byEmployee, records, availableYears,
     };
   }
@@ -85,14 +93,14 @@ export class PensionOverviewService {
   private buildQuery(query: { years?: number[]; months?: number[] }) {
     const qb = this.payrollRepo.createQueryBuilder('p')
       .leftJoinAndSelect('p.employee', 'e')
-      .where('p.pension_amount > 0');
+      .where('p.pensionAmount > 0');
     if (query.years?.length) qb.andWhere('p.year IN (:...years)', { years: query.years });
     if (query.months?.length) qb.andWhere('p.month IN (:...months)', { months: query.months });
     return qb.orderBy('p.year', 'DESC').addOrderBy('p.month', 'DESC').addOrderBy('e.name', 'ASC');
   }
 
   private async getAvailableYears(): Promise<number[]> {
-    const rows = await this.payrollRepo.createQueryBuilder('p').select('DISTINCT p.year', 'year').where('p.pension_amount > 0').orderBy('p.year', 'DESC').getRawMany<{ year: string }>();
+    const rows = await this.payrollRepo.createQueryBuilder('p').select('DISTINCT p.year', 'year').where('p.pensionAmount > 0').orderBy('p.year', 'DESC').getRawMany<{ year: string }>();
     return rows.map((r) => parseInt(r.year, 10)).filter((y) => !Number.isNaN(y));
   }
 }

@@ -280,7 +280,7 @@ export class ReportsService {
   // ─── PDF core helpers ──────────────────────────────────────────────────────
 
   private getLogoPath(filename: string): string {
-    return path.join(__dirname, '..', '..', 'assets', 'salary-slip', filename);
+    return path.join(__dirname, '..', 'assets', 'salary-slip', filename);
   }
 
   private drawPageHeader(
@@ -694,183 +694,157 @@ export class ReportsService {
     doc: InstanceType<typeof PDFDocument>,
     month: number | undefined,
     year: number | undefined,
-    periodLabel: string | undefined,
-    genLabel: string,
+    _periodLabel: string | undefined,
+    _genLabel: string,
   ) {
-    const [slabs, payrolls] = await Promise.all([
-      this.taxSlabsService.findAllTaxSlabs(),
-      this.payrollsService.findAll(month, year),
-    ]);
+    const payrolls = await this.payrollsService.findAll(month, year);
     const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
     const left = doc.page.margins.left;
-    const subtitle = [periodLabel, genLabel].filter(Boolean).join('   |   ');
-    this.drawPageHeader(doc, 'TAXES REPORT', subtitle);
+    const logoSize = 52;
 
-    doc.font('Helvetica-Bold').fontSize(9).fillColor('#000').text('Tax Slab Configuration', left, doc.y);
-    doc.moveDown(0.3);
+    const yearLabel = year ? `${year}-${String(year + 1).slice(-2)}` : 'All Periods';
+    const docTitle = 'INCOME TAX STATEMENT';
 
-    const slabCols = [
-      { label: 'Tax Slab Name', width: pageWidth * 0.25, align: 'left' as const },
-      { label: 'Min Salary', width: pageWidth * 0.14, align: 'right' as const },
-      { label: 'Max Salary', width: pageWidth * 0.14, align: 'right' as const },
-      { label: 'Rate / Formula', width: pageWidth * 0.30, align: 'left' as const },
-      { label: 'Status', width: pageWidth * 0.17, align: 'center' as const },
-    ];
-    const slabHeaderH = 20;
-    const slabRowH = 16;
-    const docTitle = 'TAXES REPORT';
+    // Group payrolls by employee
+    const empMap = new Map<number, { employee: Employee; rows: Payroll[] }>();
+    for (const p of payrolls) {
+      if (!p.employee) continue;
+      if (!empMap.has(p.employeeId)) {
+        empMap.set(p.employeeId, { employee: p.employee, rows: [] });
+      }
+      empMap.get(p.employeeId)!.rows.push(p);
+    }
 
-    const drawSlabHeader = (y: number) => {
-      let x = left;
-      slabCols.forEach((col) => {
-        this.drawTableCell(doc, col.label, x, y, col.width, slabHeaderH, {
-          bold: true, fontSize: 7, align: col.align, fill: '#d0d0d0',
-        });
-        x += col.width;
-      });
-      return y + slabHeaderH;
-    };
+    const employees = [...empMap.values()];
 
-    let y = drawSlabHeader(doc.y);
-
-    slabs.forEach((slab, si) => {
-      const { y: newY, newPage } = this.checkPageBreak(doc, y, slabRowH, docTitle, subtitle);
-      y = newPage ? drawSlabHeader(newY) : newY;
-
-      const fill = si % 2 === 0 ? undefined : '#fafafa';
-      const vals = [
-        slab.name,
-        fmt(slab.minSalary),
-        slab.maxSalary ? fmt(slab.maxSalary) : 'Unlimited',
-        this.taxSlabsService.formatSlabTaxSummary(slab),
-        slab.isActive ? 'Active' : 'Inactive',
-      ];
-      let x = left;
-      vals.forEach((val, ci) => {
-        this.drawTableCell(doc, val, x, y, slabCols[ci].width, slabRowH, {
-          fontSize: 7, align: slabCols[ci].align, fill,
-          textColor: ci === 4 ? (slab.isActive ? '#1a6b1a' : '#8b1a1a') : '#000',
-        });
-        x += slabCols[ci].width;
-      });
-      y += slabRowH;
-
-      (slab.subTaxes ?? []).forEach((st) => {
-        const { y: sy, newPage: snp } = this.checkPageBreak(doc, y, slabRowH, docTitle, subtitle);
-        y = snp ? drawSlabHeader(sy) : sy;
-        const stRate = st.type === 'percentage' ? `${Number(st.rate)}%` : `Fixed ${fmt(st.amount)}`;
-        const stVals = [`  └ ${st.name} (${st.code})`, '—', '—', stRate, st.isActive ? 'Active' : 'Inactive'];
-        let sx = left;
-        stVals.forEach((val, ci) => {
-          this.drawTableCell(doc, val, sx, y, slabCols[ci].width, slabRowH, {
-            fontSize: 6.5, align: slabCols[ci].align, fill: '#f7f7f7',
-            textColor: ci === 4 ? (st.isActive ? '#1a6b1a' : '#8b1a1a') : '#555',
-          });
-          sx += slabCols[ci].width;
-        });
-        y += slabRowH;
-      });
-    });
-
-    doc.y = y + 10;
-    doc.font('Helvetica-Bold').fontSize(9).fillColor('#000').text('Applied Tax Deductions', left, doc.y);
-    doc.moveDown(0.3);
-
-    if (payrolls.length === 0) {
-      doc.font('Helvetica').fontSize(8).text('No payroll data for selected period.', left, doc.y);
+    if (employees.length === 0) {
+      this.drawPageHeader(doc, docTitle, `For the Year ${yearLabel}`);
+      doc.font('Helvetica').fontSize(10).text('No payroll records found for this period.', left, doc.y);
       return;
     }
 
-    const totalIncomeTax = payrolls.reduce((s, p) => s + parseAmount(p.incomeTax), 0);
-    const totalSubTax = payrolls.reduce((s, p) => s + (p.deductions ?? []).filter((d) => d.category === 'sub_tax').reduce((ss, d) => ss + parseAmount(d.amount), 0), 0);
-
-    const bannerY = doc.y;
-    const bannerH = 26;
-    doc.rect(left, bannerY, pageWidth, bannerH).fill('#e8e8e8');
-    doc.fillColor('#000');
-    const bItems = [
-      { label: 'Employees', value: String(payrolls.length) },
-      { label: 'Total Income Tax', value: fmt(totalIncomeTax) },
-      { label: 'Total Sub-Tax', value: fmt(totalSubTax) },
-      { label: 'Total Deductions', value: fmt(payrolls.reduce((s, p) => s + parseAmount(p.totalDeductions), 0)) },
-    ];
-    const bColW = pageWidth / bItems.length;
-    bItems.forEach(({ label, value }, i) => {
-      const x = left + i * bColW;
-      doc.font('Helvetica-Bold').fontSize(6).text(label, x + 4, bannerY + 4, { width: bColW - 8 });
-      doc.font('Helvetica-Bold').fontSize(8).text(value, x + 4, bannerY + 13, { width: bColW - 8 });
-    });
-    doc.y = bannerY + bannerH + 4;
-
     const taxCols = [
-      { label: '#', width: pageWidth * 0.04, align: 'center' as const },
-      { label: 'Employee', width: pageWidth * 0.22, align: 'left' as const },
-      { label: 'Tax Slab', width: pageWidth * 0.18, align: 'left' as const },
-      { label: 'Gross Salary', width: pageWidth * 0.12, align: 'right' as const },
-      { label: 'Income Tax', width: pageWidth * 0.12, align: 'right' as const },
-      { label: 'Sub-Tax', width: pageWidth * 0.12, align: 'right' as const },
-      { label: 'GP Fund', width: pageWidth * 0.10, align: 'right' as const },
-      { label: 'Net Salary', width: pageWidth * 0.10, align: 'right' as const },
+      { label: `For the Year ${yearLabel}`, width: pageWidth * 0.46, align: 'left' as const },
+      { label: 'Gross Salary', width: pageWidth * 0.27, align: 'right' as const },
+      { label: 'Income Tax Deducted', width: pageWidth * 0.27, align: 'right' as const },
     ];
-    const tHeaderH = 22;
-    const tRowH = 16;
+    const colHeaderH = 22;
+    const rowH = 18;
+    const totalsH = 22;
+    const notesH = 52;
 
-    const drawTaxHeader = (ty: number) => {
+    const notes = [
+      'System generated documents required no signatures.',
+      'All amounts are in Pak Rupees.',
+      'Errors & omissions accepted.',
+    ];
+
+    const drawEmpHeader = (emp: typeof employees[0]) => {
+      const headerY = doc.y;
+      const leftLogoPath = this.getLogoPath(SALARY_SLIP_LOGOS.left);
+      const rightLogoPath = this.getLogoPath(SALARY_SLIP_LOGOS.right);
+      if (fs.existsSync(leftLogoPath)) doc.image(leftLogoPath, left, headerY, { fit: [logoSize, logoSize] });
+      if (fs.existsSync(rightLogoPath)) doc.image(rightLogoPath, left + pageWidth - logoSize, headerY, { fit: [logoSize, logoSize] });
+
+      doc.font('Helvetica-Bold').fontSize(13).text(ORG.title, left, headerY + 4, { width: pageWidth, align: 'center' });
+      doc.fontSize(11).text(ORG.subtitle, { align: 'center' });
+      doc.moveDown(0.2);
+      doc.fontSize(12).text(docTitle, { align: 'center', underline: true });
+      doc.y = Math.max(doc.y, headerY + logoSize + 6);
+      doc.moveDown(0.5);
+
+      // Full employee info — same 3-column grid as salary slip / GP fund
+      const infoFields = this.buildEmployeeInfoFields(emp.employee);
+      const colW = pageWidth / 3;
+      const infoRowH = 26;
+      const infoStartY = doc.y;
+      infoFields.forEach(([label, value], idx) => {
+        const col = idx % 3;
+        const row = Math.floor(idx / 3);
+        const x = left + col * colW;
+        const y = infoStartY + row * infoRowH;
+        doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#000').text(`${label}:`, x, y, { width: colW - 8 });
+        doc.font('Helvetica').fontSize(7.5).fillColor('#000').text(value, x, y + 9, { width: colW - 8 });
+      });
+      doc.y = infoStartY + Math.ceil(Math.max(infoFields.length, 1) / 3) * infoRowH + 10;
+    };
+
+    const drawTableHeader = (y: number) => {
       let x = left;
-      taxCols.forEach((col) => {
-        this.drawTableCell(doc, col.label, x, ty, col.width, tHeaderH, {
-          bold: true, fontSize: 7, align: col.align, fill: '#d0d0d0',
+      taxCols.forEach((col, ci) => {
+        this.drawTableCell(doc, col.label, x, y, col.width, colHeaderH, {
+          bold: true, fontSize: ci === 0 ? 7.5 : 7, align: col.align, fill: '#e0e0e0',
         });
         x += col.width;
       });
-      return ty + tHeaderH;
+      return y + colHeaderH;
     };
 
-    y = drawTaxHeader(doc.y);
+    for (let ei = 0; ei < employees.length; ei++) {
+      const emp = employees[ei];
+      const sortedRows = [...emp.rows].sort((a, b) => a.year === b.year ? a.month - b.month : a.year - b.year);
 
-    payrolls.forEach((p, idx) => {
-      const { y: newY, newPage } = this.checkPageBreak(doc, y, tRowH, docTitle, subtitle);
-      y = newPage ? drawTaxHeader(newY) : newY;
 
-      const gpFund = this.getDeductionSum(p, [GP_FUND_DEDUCTION_CODE, GP_FUND_MONTHLY_MARKUP_CODE, GP_FUND_ANNUAL_MARKUP_CODE, GP_FUND_ADVANCE_CODE]);
-      const subTax = (p.deductions ?? []).filter((d) => d.category === 'sub_tax').reduce((s, d) => s + parseAmount(d.amount), 0);
-      const slabRate = p.appliedTaxRate != null ? ` (${Number(p.appliedTaxRate)}%)` : '';
-      const fill = idx % 2 === 0 ? undefined : '#fafafa';
+      if (ei > 0) doc.addPage();
 
-      const vals = [
-        String(idx + 1),
-        `${p.employee?.name ?? ''}\n${p.employee?.employeeCode ?? ''}`,
-        `${p.taxSlabName ?? '—'}${slabRate}`,
-        fmt(p.grossSalary),
-        fmt(p.incomeTax),
-        subTax > 0 ? fmt(subTax) : '—',
-        gpFund > 0 ? fmt(gpFund) : '—',
-        fmt(p.netSalary),
-      ];
+      drawEmpHeader(emp);
 
-      let x = left;
-      vals.forEach((val, ci) => {
-        this.drawTableCell(doc, val, x, y, taxCols[ci].width, tRowH, {
-          fontSize: ci <= 1 ? 6 : 7, align: taxCols[ci].align, fill,
+      let y = drawTableHeader(doc.y);
+
+      let annualGross = 0;
+      let annualTax = 0;
+
+      for (let ri = 0; ri < sortedRows.length; ri++) {
+        const p = sortedRows[ri];
+        const gross = parseAmount(p.grossSalary);
+        const tax = parseAmount(p.incomeTax);
+        annualGross += gross;
+        annualTax += tax;
+
+        const needed = rowH + (ri === sortedRows.length - 1 ? totalsH + notesH : 0);
+        if (y + needed > doc.page.height - doc.page.margins.bottom) {
+          doc.addPage();
+          drawEmpHeader(emp);
+          y = drawTableHeader(doc.y);
+        }
+
+        const fill = ri % 2 === 0 ? undefined : '#fafafa';
+        const vals = [`${MONTH_NAMES[p.month - 1]} ${p.year}`, fmt(gross), fmt(tax)];
+        let x = left;
+        vals.forEach((val, ci) => {
+          this.drawTableCell(doc, val, x, y, taxCols[ci].width, rowH, {
+            fontSize: 8, align: taxCols[ci].align, fill,
+          });
+          x += taxCols[ci].width;
         });
-        x += taxCols[ci].width;
-      });
-      y += tRowH;
-    });
+        y += rowH;
+      }
 
-    const tTotalVals = ['', 'TOTAL', '',
-      fmt(payrolls.reduce((s, p) => s + parseAmount(p.grossSalary), 0)),
-      fmt(totalIncomeTax), fmt(totalSubTax), '',
-      fmt(payrolls.reduce((s, p) => s + parseAmount(p.netSalary), 0)),
-    ];
-    let x = left;
-    tTotalVals.forEach((val, ci) => {
-      this.drawTableCell(doc, val, x, y, taxCols[ci].width, tRowH, {
-        bold: true, fontSize: 7, align: taxCols[ci].align, fill: '#e8e8e8',
+      // Totals row spanning full width as 3-cell bar
+      const annualNet = annualGross - annualTax;
+      const totalCells = [
+        { label: 'Annual Gross Salary', value: fmt(annualGross), width: pageWidth / 3 },
+        { label: 'Annual Tax Deduction', value: fmt(annualTax), width: pageWidth / 3 },
+        { label: 'Annual Net Pay', value: fmt(annualNet), width: pageWidth / 3 },
+      ];
+      let tx = left;
+      totalCells.forEach(({ label, value, width }) => {
+        doc.rect(tx, y, width, totalsH).fillAndStroke('#d8e8d8', '#000');
+        doc.fillColor('#000');
+        doc.font('Helvetica-Bold').fontSize(6.5).text(label, tx + 4, y + 3, { width: width - 8 });
+        doc.font('Helvetica-Bold').fontSize(9).text(value, tx + 4, y + 12, { width: width - 8, align: 'right' });
+        tx += width;
       });
-      x += taxCols[ci].width;
-    });
-    doc.y = y + tRowH + 6;
+      y += totalsH;
+
+      // Notes
+      doc.y = y + 6;
+      doc.font('Helvetica-Bold').fontSize(7).fillColor('#000').text('NOTE:', left);
+      doc.font('Helvetica').fontSize(6.5);
+      notes.forEach((note) => {
+        doc.text(`·  ${note}`, left + 8, doc.y, { width: pageWidth - 8 });
+      });
+    }
   }
 
   // ─── GP Fund Report ────────────────────────────────────────────────────────

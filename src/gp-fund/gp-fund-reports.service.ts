@@ -244,7 +244,7 @@ export class GpFundReportsService {
   }
 
   private getLogoPath(filename: string): string {
-    return path.join(__dirname, '..', '..', 'assets', 'salary-slip', filename);
+    return path.join(__dirname, '..', 'assets', 'salary-slip', filename);
   }
 
   private drawTableCell(

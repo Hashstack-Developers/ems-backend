@@ -66,6 +66,9 @@ export class Payroll {
   @Column({ name: 'pension_amount', type: 'decimal', precision: 12, scale: 2, default: 0 })
   pensionAmount: number;
 
+  @Column({ name: 'pension_employer_amount', type: 'decimal', precision: 12, scale: 2, default: 0 })
+  pensionEmployerAmount: number;
+
   @Column({ name: 'tax_slab_id', type: 'int', nullable: true })
   taxSlabId: number | null;
 

@@ -9,7 +9,7 @@ import {
   GP_FUND_DEDUCTION_CODE,
   GP_FUND_MONTHLY_MARKUP_CODE,
 } from '../gp-fund/gp-fund.utils';
-import { PENSION_DEDUCTION_CODE } from '../pension/pension.utils';
+import { PENSION_DEDUCTION_CODE, PENSION_EMPLOYER_DEDUCTION_CODE } from '../pension/pension.utils';
 import { Payroll, PayrollStatus } from './entities/payroll.entity';
 import { PayrollDeduction } from './entities/payroll-deduction.entity';
 import { SALARY_SLIP_BANK } from './salary-slip.constants';
@@ -175,6 +175,9 @@ function buildAllowances(employee: Employee, payroll: Payroll): SalarySlipLineIt
   if (welfareAmt > 0) lines.push({ label: 'Welfare Allowance', amount: welfareAmt });
   if (mgmtAmt > 0) lines.push({ label: 'Management Allowance', amount: mgmtAmt });
 
+  const pensionEmployerAmt = roundAmount(payroll.pensionEmployerAmount ?? 0);
+  if (pensionEmployerAmt > 0) lines.push({ label: 'Pension (Employer)', amount: pensionEmployerAmt });
+
   if (lines.length === 0 && parseAmount(employee.grossSalary) > 0) {
     lines.push({ label: 'Gross Salary', amount: roundAmount(employee.grossSalary) });
   } else if (lines.length === 0 && parseAmount(employee.grossSalaryWithTaxes) > 0) {
@@ -224,7 +227,7 @@ function buildDeductions(
     parseAmount(employee.loanAdvance) + getDeductionAmount(deductions, [GP_FUND_ADVANCE_CODE]),
   );
 
-  const pensionTotal = getDeductionAmount(deductions, [PENSION_DEDUCTION_CODE]);
+  const pensionEmployee = getDeductionAmount(deductions, [PENSION_DEDUCTION_CODE]);
 
   const lines: SalarySlipLineItem[] = [
     { label: SALARY_SLIP_DEDUCTION_LABELS.incomeTax, amount: totalTax },
@@ -232,8 +235,8 @@ function buildDeductions(
     { label: SALARY_SLIP_DEDUCTION_LABELS.loanAdvance, amount: loanAdvance },
   ];
 
-  if (pensionTotal > 0) {
-    lines.push({ label: SALARY_SLIP_DEDUCTION_LABELS.pension, amount: pensionTotal });
+  if (pensionEmployee > 0) {
+    lines.push({ label: SALARY_SLIP_DEDUCTION_LABELS.pension, amount: pensionEmployee });
   }
 
   const otherDeduction = parseAmount(employee.deduction);

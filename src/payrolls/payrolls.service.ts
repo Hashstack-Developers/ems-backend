@@ -9,7 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EmployeesService } from '../employees/employees.service';
 import { computePayrollGross, getEmployeeFullName } from '../employees/employee.utils';
-import { Employee, EmployeeStatus, EmployeeType } from '../employees/entities/employee.entity';
+import { Employee, EmployeeStatus } from '../employees/entities/employee.entity';
 import { GP_FUND_ANNUAL_MARKUP_CODE, GP_FUND_ADVANCE_CODE, GP_FUND_DEDUCTION_CODE } from '../gp-fund/gp-fund.utils';
 import { GpFundAdvanceService } from '../gp-fund/gp-fund-advance.service';
 import { GpFundService } from '../gp-fund/gp-fund.service';
@@ -27,7 +27,7 @@ import { Payroll, PayrollStatus } from './entities/payroll.entity';
 import { SalarySlipsService } from './salary-slips.service';
 import { PensionEnrollmentService } from '../pension/pension-enrollment.service';
 import { PensionSettingsService } from '../pension/pension-settings.service';
-import { PENSION_DEDUCTION_CODE } from '../pension/pension.utils';
+import { PENSION_DEDUCTION_CODE, PENSION_EMPLOYER_DEDUCTION_CODE } from '../pension/pension.utils';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -464,14 +464,14 @@ export class PayrollsService {
 
     const pensionEnrollment = await this.pensionEnrollmentService.getActiveEnrollment(employee.id);
     const pensionSettings = await this.pensionSettingsService.getSettings();
-    const pensionRate = pensionEnrollment
-      ? (employee.employeeType === EmployeeType.EMPLOYER
-          ? Number(pensionSettings.employerRate)
-          : Number(pensionSettings.employeeRate))
-      : 0;
     const basicPayForPension = Number(employee.basicPayDec2025 ?? 0);
-    const pensionAmount = pensionEnrollment && pensionRate > 0
-      ? this.pensionSettingsService.computePensionAmount(basicPayForPension, pensionRate)
+    const employeeRate = pensionEnrollment ? Number(pensionSettings.employeeRate) : 0;
+    const employerRate = pensionEnrollment ? Number(pensionSettings.employerRate) : 0;
+    const pensionAmount = pensionEnrollment && employeeRate > 0
+      ? this.pensionSettingsService.computePensionAmount(basicPayForPension, employeeRate)
+      : 0;
+    const pensionEmployerAmount = pensionEnrollment && employerRate > 0
+      ? this.pensionSettingsService.computePensionAmount(basicPayForPension, employerRate)
       : 0;
 
     const totalDeductions = roundAmount(taxResult.totalDeductions + totalGpFundDeductions + pensionAmount);
@@ -491,6 +491,7 @@ export class PayrollsService {
       welfareAllowanceAmount: welfareAmount,
       managementAllowanceAmount: managementAmount,
       pensionAmount,
+      pensionEmployerAmount,
       taxSlabId: taxResult.taxSlab?.id ?? null,
       taxSlabName: taxResult.taxSlab?.name ?? 'No applicable slab',
       appliedTaxRate: taxResult.taxSlab?.taxRate != null
@@ -603,12 +604,26 @@ export class PayrollsService {
     if (pensionAmount > 0 && pensionEnrollment) {
       deductions.push({
         payrollId: savedPayroll.id,
-        name: 'Pension Contribution',
+        name: 'Pension (Employee)',
         code: PENSION_DEDUCTION_CODE,
         category: DeductionCategory.PENSION,
         amount: pensionAmount,
         calculationType: DeductionCalculationType.PERCENTAGE,
-        appliedRate: pensionRate,
+        appliedRate: employeeRate,
+        appliedFixedAmount: null,
+        sourceSubTaxId: null,
+      });
+    }
+
+    if (pensionEmployerAmount > 0 && pensionEnrollment) {
+      deductions.push({
+        payrollId: savedPayroll.id,
+        name: 'Pension (Employer)',
+        code: PENSION_EMPLOYER_DEDUCTION_CODE,
+        category: DeductionCategory.PENSION,
+        amount: pensionEmployerAmount,
+        calculationType: DeductionCalculationType.PERCENTAGE,
+        appliedRate: employerRate,
         appliedFixedAmount: null,
         sourceSubTaxId: null,
       });
