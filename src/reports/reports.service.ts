@@ -12,7 +12,6 @@ import { PayrollsService } from '../payrolls/payrolls.service';
 import { PensionOverviewService } from '../pension/pension-overview.service';
 import { SALARY_SLIP_BANK, SALARY_SLIP_LOGOS } from '../payrolls/salary-slip.constants';
 import { SALARY_SLIP_ALLOWANCE_FIELDS } from '../payrolls/salary-slip.fields';
-import { TaxSlabsService } from '../tax-slabs/tax-slabs.service';
 import {
   GP_FUND_ADVANCE_CODE,
   GP_FUND_ANNUAL_MARKUP_CODE,
@@ -57,7 +56,6 @@ export class ReportsService {
   constructor(
     private readonly employeesService: EmployeesService,
     private readonly payrollsService: PayrollsService,
-    private readonly taxSlabsService: TaxSlabsService,
     private readonly gpFundOverviewService: GpFundOverviewService,
     private readonly pensionOverviewService: PensionOverviewService,
   ) {}
@@ -340,79 +338,47 @@ export class ReportsService {
       }
 
       case 'taxes': {
-        const [slabs, payrolls] = await Promise.all([
-          this.taxSlabsService.findAllTaxSlabs(),
-          this.payrollsService.findAll(month, year),
-        ]);
+        const payrolls = await this.payrollsService.findAll(month, year);
         const headers = [
           '#',
-          'Category',
-          'Slab Name',
-          'Name',
-          'Code',
-          'Min Salary',
-          'Max Salary',
-          'Rate / Formula',
-          'Status',
+          'Employee Code',
+          'Employee Name',
+          'Period',
+          'Gross Salary',
+          'Tax Slab',
+          'Applied Rate',
           'Income Tax',
           'Total Deductions',
           'Net Salary',
         ];
-        const slabRows = slabs.flatMap((s) => [
-          [
-            'Tax Slab',
-            s.name,
-            s.name,
-            '',
-            Number(s.minSalary),
-            s.maxSalary ? Number(s.maxSalary) : 'Unlimited',
-            this.taxSlabsService.formatSlabTaxSummary(s),
-            s.isActive ? 'Active' : 'Inactive',
-            '',
-            '',
-            '',
-          ],
-          ...(s.subTaxes ?? []).map((st) => [
-            'Sub-Tax',
-            s.name,
-            st.name,
-            st.code,
-            '',
-            '',
-            st.type === 'percentage' ? `${Number(st.rate)}%` : `Fixed ${Number(st.amount)}`,
-            st.isActive ? 'Active' : 'Inactive',
-            '',
-            '',
-            '',
-          ]),
-        ]);
-        const payrollRows = payrolls.map((p) => [
-          'Payroll Deduction',
-          p.taxSlabName ?? '',
-          p.employee ? getEmployeeFullName(p.employee) : '',
+        const rows = payrolls.map((p, idx) => [
+          idx + 1,
           p.employee?.employeeCode ?? '',
-          Number(p.grossSalary),
-          '',
-          p.appliedTaxRate != null ? `${Number(p.appliedTaxRate)}%` : '',
+          p.employee ? getEmployeeFullName(p.employee) : '',
           `${MONTH_NAMES[p.month - 1]} ${p.year}`,
+          Number(p.grossSalary),
+          p.taxSlabName ?? '',
+          p.appliedTaxRate != null ? `${Number(p.appliedTaxRate)}%` : '',
           Number(p.incomeTax),
           Number(p.totalDeductions),
           Number(p.netSalary),
         ]);
-        const combined = [...slabRows, ...payrollRows];
-        const rows = combined.map((r, idx) => [idx + 1, ...r]);
+        const totalIncomeTax = payrolls.reduce((s, p) => s + Number(p.incomeTax), 0);
+        const totalNet = payrolls.reduce((s, p) => s + Number(p.netSalary), 0);
         const buffer = await buildBrandedExcel({
           sheetName: 'Taxes Report',
           documentTitle: 'TAXES REPORT',
           periodLabel,
           summaryParts: [
-            `Tax Slabs / Sub-Taxes: ${slabRows.length}`,
-            `Payroll Deduction Rows: ${payrollRows.length}`,
+            `Total Records: ${payrolls.length}`,
+            `Total Income Tax: ${fmt(totalIncomeTax)}`,
+            `Total Net: ${fmt(totalNet)}`,
           ],
           headers,
           rows,
-          numericColumns: [6, 10, 11, 12],
-          emptyMessage: 'No tax data found for this period.',
+          numericColumns: [5, 8, 9, 10],
+          columnWidths: [5, 14, 22, 14, 12, 12, 12, 12, 14, 12],
+          emptyMessage: 'No payroll tax records found for this period.',
           getLogoPath,
         });
         return {
