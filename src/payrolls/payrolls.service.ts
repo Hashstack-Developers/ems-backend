@@ -476,14 +476,16 @@ export class PayrollsService {
 
     const totalDeductions = roundAmount(taxResult.totalDeductions + totalGpFundDeductions + pensionAmount);
 
-    const netSalary = roundAmount(payableGross - totalDeductions);
+    // Gross includes employer pension; Net Pay = Gross − employee-side deductions.
+    const grossSalary = roundAmount(payableGross + pensionEmployerAmount);
+    const netSalary = roundAmount(grossSalary - totalDeductions);
 
     const payroll = this.payrollsRepository.create({
       employeeId: employee.id,
       month,
       year,
       basicSalary: roundAmount(fullGross),
-      grossSalary: roundAmount(payableGross),
+      grossSalary,
       salaryDays,
       incomeTax: roundAmount(taxResult.incomeTax),
       totalDeductions,

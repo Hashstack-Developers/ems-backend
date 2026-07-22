@@ -288,7 +288,10 @@ export function buildSalarySlipPayload(
   const deductions = payroll.deductions ?? [];
   const allowances = buildAllowances(emp, payroll);
   const allowanceTotal = sumLines(allowances);
+  // Slip Gross = pay & allowances (incl. employer pension). Net must always be Gross − Deduction.
   const grossDisplay = allowanceTotal > 0 ? allowanceTotal : roundAmount(payroll.grossSalary);
+  const deductionsDisplay = roundAmount(payroll.totalDeductions);
+  const netDisplay = roundAmount(grossDisplay - deductionsDisplay);
 
   const employee = {
     id: emp.id,
@@ -347,8 +350,8 @@ export function buildSalarySlipPayload(
     })),
     summary: {
       grossSalary: grossDisplay,
-      totalDeductions: roundAmount(payroll.totalDeductions),
-      netSalary: roundAmount(payroll.netSalary),
+      totalDeductions: deductionsDisplay,
+      netSalary: netDisplay,
       incomeTax: roundAmount(payroll.incomeTax),
       taxSlabName: payroll.taxSlabName,
       appliedTaxRate: payroll.appliedTaxRate != null ? Number(payroll.appliedTaxRate) : null,

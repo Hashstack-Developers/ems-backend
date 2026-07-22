@@ -1,7 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
-import { Parser } from 'json2csv';
 import PDFDocument from 'pdfkit';
 import { formatAmount, parseAmount } from '../common/utils/currency.utils';
 import { Employee } from '../employees/entities/employee.entity';
@@ -20,6 +19,12 @@ import {
   GP_FUND_DEDUCTION_CODE,
   GP_FUND_MONTHLY_MARKUP_CODE,
 } from '../gp-fund/gp-fund.utils';
+import { PENSION_DEDUCTION_CODE, PENSION_EMPLOYER_DEDUCTION_CODE } from '../pension/pension.utils';
+import {
+  buildBrandedExcel,
+  EXCEL_CONTENT_TYPE,
+  periodLabelForReport,
+} from './report-excel.builder';
 
 export type ReportType = 'employees' | 'payrolls' | 'taxes' | 'gpFund' | 'pension';
 export type ReportFormat = 'csv' | 'pdf';
@@ -73,208 +78,451 @@ export class ReportsService {
     const timestamp = new Date().toISOString().slice(0, 10);
 
     if (format === 'csv') {
-      const { csv, filename } = await this.generateCsv(type, month, year, timestamp);
-      return { buffer: Buffer.from(csv, 'utf-8'), filename, contentType: 'text/csv' };
+      // CSV cannot embed logos — all "csv" downloads are branded Excel (.xlsx).
+      return this.generateSpreadsheet(type, month, year, timestamp);
     }
 
     const { buffer, filename } = await this.generatePdf(type, month, year, timestamp);
     return { buffer, filename, contentType: 'application/pdf' };
   }
 
-  // ─── CSV ───────────────────────────────────────────────────────────────────
+  // ─── Excel (branded, used for former CSV downloads) ────────────────────────
 
-  private async generateCsv(
+  private async generateSpreadsheet(
     type: ReportType,
     month: number | undefined,
     year: number | undefined,
     timestamp: string,
-  ) {
-    let data: Record<string, unknown>[] = [];
-    let filename = '';
+  ): Promise<{ buffer: Buffer; filename: string; contentType: string }> {
+    const periodLabel = periodLabelForReport(month, year, MONTH_NAMES);
+    const getLogoPath = (filename: string) => this.getLogoPath(filename);
 
     switch (type) {
       case 'employees': {
         const employees = await this.employeesService.findAll();
-        data = employees.map((e) => ({
-          'Employee Code': e.employeeCode,
-          'Sr. No.': e.srNo ?? '',
-          'Full Name': e.name,
-          "Father's Name": e.fatherName ?? '',
-          'CNIC No.': e.cnicNo ?? '',
-          'Mobile': e.mobile ?? '',
-          'Email': e.email,
-          'Address': e.address ?? '',
-          'Designation': e.designation,
-          'Basic Pay Scale (BPS)': e.basicPayScale ?? '',
-          'Stage': e.stage ?? '',
-          'Religion': e.religion ?? '',
-          'Disability': e.disability ?? '',
-          'Employment Type': e.employmentType ?? '',
-          'Date of Birth': e.dateOfBirth ?? '',
-          'Date of Joining': e.dateOfJoining,
-          'Date of Regularization': e.dateOfRegularization ?? '',
-          'Contract Expiry Date': e.contractExpiryDate ?? '',
-          'Date of Retirement': e.dateOfRetirement ?? '',
-          'Length of Service': e.lengthOfService ?? '',
-          'Status': e.status,
-          'Basic Pay (Dec 2025)': Number(e.basicPayDec2025 ?? 0),
-          'Basic Pay (Jul 2026)': Number(e.basicPayJul2026 ?? 0),
-          'Personal Allowance': Number(e.personalAllowance ?? 0),
-          'House Rent Allowance': Number(e.hr ?? 0),
-          'Conveyance Allowance': Number(e.ca ?? 0),
-          'Medical Allowance': Number(e.ma ?? 0),
-          'Ad-hoc Allowance 2022': Number(e.adHocAllowance2022 ?? 0),
-          'Ad-hoc Allowance 2023': Number(e.adHocAllowance2023 ?? 0),
-          'Ad-hoc Allowance 2024': Number(e.adHocAllowance2024 ?? 0),
-          'Ad-hoc Allowance 2025': Number(e.adHocAllowance2025 ?? 0),
-          'Ad-hoc Allowance 2026': Number(e.adHocAllowance2026 ?? 0),
-          'Special Pay': Number(e.specialPay ?? 0),
-          'Personal Pay': Number(e.personalPay ?? 0),
-          'Overtime Allowance': Number(e.overtimeAllowance ?? 0),
-          'Integrated Allowance': Number(e.integratedAllowance ?? 0),
-          'Washing Allowance': Number(e.wa ?? 0),
-          'Computer Allowance': Number(e.computerAllowance ?? 0),
-          'Special Allowance': Number(e.specialAllowance ?? 0),
-          'Mphil / Special Allowance': Number(e.mphilSpecialAllowance ?? 0),
-          'Social Security Benefit': Number(e.socialSecurityBenefit ?? 0),
-          'Arrears': Number(e.arrears ?? 0),
-          'Gross Salary': Number(e.grossSalary ?? 0),
-          'Gross Salary With Taxes': Number(e.grossSalaryWithTaxes ?? 0),
-          'GP Fund Scale': e.gpFund ?? '',
-          'Previously Collected GP Fund': Number(e.previouslyCollectedGpFund ?? 0),
-          'GPF Account Number': e.gpfAccountNumber ?? '',
-          'Nominee Name': e.nomineeName ?? '',
-          'Nominee Relation': e.nomineeRelation ?? '',
-          'Loan / Advance': Number(e.loanAdvance ?? 0),
-          'Other Deduction': Number(e.deduction ?? 0),
-          'Net Payable': Number(e.netPayable ?? 0),
-          'Bank Name': SALARY_SLIP_BANK.name,
-          'Bank Branch': SALARY_SLIP_BANK.branch,
-          'Branch Code': SALARY_SLIP_BANK.branchCode,
-          'Account Number': e.accountNumber ?? '',
-        }));
-        filename = `employees-report-${timestamp}.csv`;
-        break;
+        const headers = [
+          '#',
+          'Employee Code',
+          'Sr. No.',
+          'Full Name',
+          "Father's Name",
+          'CNIC No.',
+          'Mobile',
+          'Email',
+          'Address',
+          'Designation',
+          'BPS',
+          'Stage',
+          'Religion',
+          'Disability',
+          'Employment Type',
+          'Date of Birth',
+          'Date of Joining',
+          'Date of Regularization',
+          'Contract Expiry',
+          'Date of Retirement',
+          'Length of Service',
+          'Status',
+          'Basic Pay (Dec 2025)',
+          'Basic Pay (Jul 2026)',
+          'Personal Allowance',
+          'House Rent Allowance',
+          'Conveyance Allowance',
+          'Medical Allowance',
+          'Ad-hoc Allowance 2022',
+          'Ad-hoc Allowance 2023',
+          'Ad-hoc Allowance 2024',
+          'Ad-hoc Allowance 2025',
+          'Ad-hoc Allowance 2026',
+          'Special Pay',
+          'Personal Pay',
+          'Overtime Allowance',
+          'Integrated Allowance',
+          'Washing Allowance',
+          'Computer Allowance',
+          'Special Allowance',
+          'Mphil / Special Allowance',
+          'Social Security Benefit',
+          'Arrears',
+          'Gross Salary',
+          'Gross Salary With Taxes',
+          'GP Fund Scale',
+          'Previously Collected GP Fund',
+          'GPF Account Number',
+          'Nominee Name',
+          'Nominee Relation',
+          'Loan / Advance',
+          'Other Deduction',
+          'Net Payable',
+          'Bank Name',
+          'Bank Branch',
+          'Branch Code',
+          'Account Number',
+        ];
+        const moneyCols = [
+          23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 47, 51, 52, 53,
+        ];
+        const rows = employees.map((e, idx) => [
+          idx + 1,
+          e.employeeCode,
+          e.srNo ?? '',
+          e.name,
+          e.fatherName ?? '',
+          e.cnicNo ?? '',
+          e.mobile ?? '',
+          e.email,
+          e.address ?? '',
+          e.designation,
+          e.basicPayScale ?? '',
+          e.stage ?? '',
+          e.religion ?? '',
+          e.disability ?? '',
+          e.employmentType ?? '',
+          e.dateOfBirth ?? '',
+          e.dateOfJoining,
+          e.dateOfRegularization ?? '',
+          e.contractExpiryDate ?? '',
+          e.dateOfRetirement ?? '',
+          e.lengthOfService ?? '',
+          e.status,
+          Number(e.basicPayDec2025 ?? 0),
+          Number(e.basicPayJul2026 ?? 0),
+          Number(e.personalAllowance ?? 0),
+          Number(e.hr ?? 0),
+          Number(e.ca ?? 0),
+          Number(e.ma ?? 0),
+          Number(e.adHocAllowance2022 ?? 0),
+          Number(e.adHocAllowance2023 ?? 0),
+          Number(e.adHocAllowance2024 ?? 0),
+          Number(e.adHocAllowance2025 ?? 0),
+          Number(e.adHocAllowance2026 ?? 0),
+          Number(e.specialPay ?? 0),
+          Number(e.personalPay ?? 0),
+          Number(e.overtimeAllowance ?? 0),
+          Number(e.integratedAllowance ?? 0),
+          Number(e.wa ?? 0),
+          Number(e.computerAllowance ?? 0),
+          Number(e.specialAllowance ?? 0),
+          Number(e.mphilSpecialAllowance ?? 0),
+          Number(e.socialSecurityBenefit ?? 0),
+          Number(e.arrears ?? 0),
+          Number(e.grossSalary ?? 0),
+          Number(e.grossSalaryWithTaxes ?? 0),
+          e.gpFund ?? '',
+          Number(e.previouslyCollectedGpFund ?? 0),
+          e.gpfAccountNumber ?? '',
+          e.nomineeName ?? '',
+          e.nomineeRelation ?? '',
+          Number(e.loanAdvance ?? 0),
+          Number(e.deduction ?? 0),
+          Number(e.netPayable ?? 0),
+          SALARY_SLIP_BANK.name,
+          SALARY_SLIP_BANK.branch,
+          SALARY_SLIP_BANK.branchCode,
+          e.accountNumber ?? '',
+        ]);
+        const buffer = await buildBrandedExcel({
+          sheetName: 'Employees Report',
+          documentTitle: 'EMPLOYEES REPORT',
+          periodLabel: 'Period: All employees',
+          summaryParts: [`Total Records: ${employees.length}`],
+          headers,
+          rows,
+          numericColumns: moneyCols,
+          emptyMessage: 'No employees found.',
+          getLogoPath,
+        });
+        return {
+          buffer,
+          filename: `employees-report-${timestamp}.xlsx`,
+          contentType: EXCEL_CONTENT_TYPE,
+        };
       }
+
       case 'payrolls': {
         const payrolls = await this.payrollsService.findAll(month, year);
-        data = payrolls.map((p) => {
-          const gpFund = this.getDeductionSum(p, [GP_FUND_DEDUCTION_CODE, GP_FUND_MONTHLY_MARKUP_CODE, GP_FUND_ANNUAL_MARKUP_CODE]);
+        const summary = await this.payrollsService.getSummary(month, year);
+        const headers = [
+          '#',
+          'Employee Code',
+          'Employee Name',
+          'Designation',
+          'Stage',
+          'Period',
+          'Gross Salary',
+          'Tax Slab',
+          'Income Tax',
+          'Sub-Tax',
+          'GP Fund',
+          'GP Advance',
+          'Employee Pension',
+          'Employer Pension',
+          'Total Deductions',
+          'Net Salary',
+          'Status',
+        ];
+        const rows = payrolls.map((p, idx) => {
+          const gpFund = this.getDeductionSum(p, [
+            GP_FUND_DEDUCTION_CODE,
+            GP_FUND_MONTHLY_MARKUP_CODE,
+            GP_FUND_ANNUAL_MARKUP_CODE,
+          ]);
           const advance = this.getDeductionSum(p, [GP_FUND_ADVANCE_CODE]);
+          const pensionEmployee = this.getPayrollPensionEmployee(p);
+          const pensionEmployer = this.getPayrollPensionEmployer(p);
           const subTaxes = (p.deductions ?? [])
             .filter((d) => d.category === 'sub_tax')
             .reduce((s, d) => s + parseAmount(d.amount), 0);
-          return {
-            'Employee Code': p.employee?.employeeCode ?? '',
-            'Employee Name': p.employee ? getEmployeeFullName(p.employee) : '',
-            'Designation': p.employee?.designation ?? '',
-            'Stage': p.employee?.stage ?? '',
-            'Month': p.month,
-            'Year': p.year,
-            'Period': `${MONTH_NAMES[p.month - 1]} ${p.year}`,
-            'Gross Salary': Number(p.grossSalary),
-            'Tax Slab': p.taxSlabName ?? '',
-            'Applied Tax Rate': p.appliedTaxRate != null ? `${Number(p.appliedTaxRate)}%` : '',
-            'Income Tax': Number(p.incomeTax),
-            'Sub-Tax Deductions': Math.round(subTaxes * 100) / 100,
-            'GP Fund Deduction': Math.round(gpFund * 100) / 100,
-            'GP Fund Advance': Math.round(advance * 100) / 100,
-            'Total Deductions': Number(p.totalDeductions),
-            'Net Salary': Number(p.netSalary),
-            'Salary Days': p.salaryDays ?? '',
-            'Status': p.status,
-          };
+          return [
+            idx + 1,
+            p.employee?.employeeCode ?? '',
+            p.employee ? getEmployeeFullName(p.employee) : '',
+            p.employee?.designation ?? '',
+            p.employee?.stage ?? '',
+            `${MONTH_NAMES[p.month - 1]} ${p.year}`,
+            Number(p.grossSalary),
+            p.taxSlabName ?? '',
+            Number(p.incomeTax),
+            Math.round(subTaxes * 100) / 100,
+            Math.round(gpFund * 100) / 100,
+            Math.round(advance * 100) / 100,
+            Math.round(pensionEmployee * 100) / 100,
+            Math.round(pensionEmployer * 100) / 100,
+            Number(p.totalDeductions),
+            Number(p.netSalary),
+            p.status,
+          ];
         });
-        filename = `payrolls-report-${timestamp}.csv`;
-        break;
+        const buffer = await buildBrandedExcel({
+          sheetName: 'Payrolls Report',
+          documentTitle: 'PAYROLLS REPORT',
+          periodLabel,
+          summaryParts: [
+            `Total Records: ${summary.count}`,
+            `Total Gross: ${fmt(summary.totalGross)}`,
+            `Total Deductions: ${fmt(summary.totalDeductions)}`,
+            `Total Net: ${fmt(summary.totalNet)}`,
+          ],
+          headers,
+          rows,
+          numericColumns: [7, 9, 10, 11, 12, 13, 14, 15, 16],
+          columnWidths: [5, 14, 22, 16, 12, 14, 12, 14, 11, 10, 10, 11, 14, 14, 14, 12, 10],
+          emptyMessage: 'No payroll records found for this period.',
+          totalsRow: payrolls.length
+            ? [
+                '',
+                '',
+                'TOTAL',
+                '',
+                '',
+                '',
+                Number(summary.totalGross),
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                Number(summary.totalDeductions),
+                Number(summary.totalNet),
+                '',
+              ]
+            : undefined,
+          totalsNumericColumns: [7, 15, 16],
+          getLogoPath,
+        });
+        return {
+          buffer,
+          filename: `payrolls-report-${timestamp}.xlsx`,
+          contentType: EXCEL_CONTENT_TYPE,
+        };
       }
+
       case 'taxes': {
         const [slabs, payrolls] = await Promise.all([
           this.taxSlabsService.findAllTaxSlabs(),
           this.payrollsService.findAll(month, year),
         ]);
+        const headers = [
+          '#',
+          'Category',
+          'Slab Name',
+          'Name',
+          'Code',
+          'Min Salary',
+          'Max Salary',
+          'Rate / Formula',
+          'Status',
+          'Income Tax',
+          'Total Deductions',
+          'Net Salary',
+        ];
         const slabRows = slabs.flatMap((s) => [
-          {
-            'Category': 'Tax Slab',
-            'Slab Name': s.name,
-            'Name': s.name,
-            'Code': '',
-            'Min Salary': Number(s.minSalary),
-            'Max Salary': s.maxSalary ? Number(s.maxSalary) : 'Unlimited',
-            'Rate / Formula': this.taxSlabsService.formatSlabTaxSummary(s),
-            'Status': s.isActive ? 'Active' : 'Inactive',
-          },
-          ...(s.subTaxes ?? []).map((st) => ({
-            'Category': 'Sub-Tax',
-            'Slab Name': s.name,
-            'Name': st.name,
-            'Code': st.code,
-            'Min Salary': '',
-            'Max Salary': '',
-            'Rate / Formula': st.type === 'percentage' ? `${Number(st.rate)}%` : `Fixed ${Number(st.amount)}`,
-            'Status': st.isActive ? 'Active' : 'Inactive',
-          })),
+          [
+            'Tax Slab',
+            s.name,
+            s.name,
+            '',
+            Number(s.minSalary),
+            s.maxSalary ? Number(s.maxSalary) : 'Unlimited',
+            this.taxSlabsService.formatSlabTaxSummary(s),
+            s.isActive ? 'Active' : 'Inactive',
+            '',
+            '',
+            '',
+          ],
+          ...(s.subTaxes ?? []).map((st) => [
+            'Sub-Tax',
+            s.name,
+            st.name,
+            st.code,
+            '',
+            '',
+            st.type === 'percentage' ? `${Number(st.rate)}%` : `Fixed ${Number(st.amount)}`,
+            st.isActive ? 'Active' : 'Inactive',
+            '',
+            '',
+            '',
+          ]),
         ]);
-        const payrollRows = payrolls.map((p) => ({
-          'Category': 'Payroll Deduction',
-          'Slab Name': p.taxSlabName ?? '',
-          'Name': p.employee ? getEmployeeFullName(p.employee) : '',
-          'Code': p.employee?.employeeCode ?? '',
-          'Min Salary': Number(p.grossSalary),
-          'Max Salary': '',
-          'Rate / Formula': p.appliedTaxRate != null ? `${Number(p.appliedTaxRate)}%` : '',
-          'Status': `${MONTH_NAMES[p.month - 1]} ${p.year}`,
-          'Income Tax': Number(p.incomeTax),
-          'Total Deductions': Number(p.totalDeductions),
-          'Net Salary': Number(p.netSalary),
-        }));
-        data = [...slabRows, ...payrollRows];
-        filename = `taxes-report-${timestamp}.csv`;
-        break;
+        const payrollRows = payrolls.map((p) => [
+          'Payroll Deduction',
+          p.taxSlabName ?? '',
+          p.employee ? getEmployeeFullName(p.employee) : '',
+          p.employee?.employeeCode ?? '',
+          Number(p.grossSalary),
+          '',
+          p.appliedTaxRate != null ? `${Number(p.appliedTaxRate)}%` : '',
+          `${MONTH_NAMES[p.month - 1]} ${p.year}`,
+          Number(p.incomeTax),
+          Number(p.totalDeductions),
+          Number(p.netSalary),
+        ]);
+        const combined = [...slabRows, ...payrollRows];
+        const rows = combined.map((r, idx) => [idx + 1, ...r]);
+        const buffer = await buildBrandedExcel({
+          sheetName: 'Taxes Report',
+          documentTitle: 'TAXES REPORT',
+          periodLabel,
+          summaryParts: [
+            `Tax Slabs / Sub-Taxes: ${slabRows.length}`,
+            `Payroll Deduction Rows: ${payrollRows.length}`,
+          ],
+          headers,
+          rows,
+          numericColumns: [6, 10, 11, 12],
+          emptyMessage: 'No tax data found for this period.',
+          getLogoPath,
+        });
+        return {
+          buffer,
+          filename: `taxes-report-${timestamp}.xlsx`,
+          contentType: EXCEL_CONTENT_TYPE,
+        };
       }
+
       case 'gpFund': {
         const years = year ? [year] : undefined;
         const months = month ? [month] : undefined;
         const overview = await this.gpFundOverviewService.getOverview({ years, months });
-        data = overview.byEmployee.map((emp) => ({
-          'Employee Code': emp.employeeCode,
-          'Employee Name': emp.name,
-          'Designation': emp.designation,
-          'GP Fund Scale': emp.gpFundScale ?? '',
-          'Subscription Value': emp.subscriptionValue,
-          'Payroll Count': emp.payrollCount,
-          'Base Collected': emp.totalBaseCollected,
-          'Annual Markup': emp.totalAnnualMarkup,
-          'Total Collected': emp.totalCollected,
-        }));
-        if (data.length === 0) {
-          data = [{ 'Message': 'No GP fund contributions found for the selected period' }];
-        }
-        filename = `gp-fund-report-${timestamp}.csv`;
-        break;
+        const headers = [
+          '#',
+          'Employee Code',
+          'Employee Name',
+          'Designation',
+          'GP Fund Scale',
+          'Subscription Value',
+          'Payroll Count',
+          'Base Collected',
+          'Annual Markup',
+          'Total Collected',
+        ];
+        const rows = overview.byEmployee.map((emp, idx) => [
+          idx + 1,
+          emp.employeeCode,
+          emp.name,
+          emp.designation,
+          emp.gpFundScale ?? '',
+          emp.subscriptionValue,
+          emp.payrollCount,
+          emp.totalBaseCollected,
+          emp.totalAnnualMarkup,
+          emp.totalCollected,
+        ]);
+        const totalCollected = overview.byEmployee.reduce(
+          (s, e) => s + Number(e.totalCollected ?? 0),
+          0,
+        );
+        const buffer = await buildBrandedExcel({
+          sheetName: 'GP Fund Report',
+          documentTitle: 'GP FUND REPORT',
+          periodLabel,
+          summaryParts: [
+            `Total Employees: ${overview.byEmployee.length}`,
+            `Total Collected: ${fmt(totalCollected)}`,
+          ],
+          headers,
+          rows,
+          numericColumns: [6, 8, 9, 10],
+          columnWidths: [5, 14, 22, 16, 14, 14, 12, 14, 14, 14],
+          emptyMessage: 'No GP fund contributions found for the selected period.',
+          getLogoPath,
+        });
+        return {
+          buffer,
+          filename: `gp-fund-report-${timestamp}.xlsx`,
+          contentType: EXCEL_CONTENT_TYPE,
+        };
       }
+
       case 'pension': {
         const years = year ? [year] : undefined;
         const months = month ? [month] : undefined;
         const overview = await this.pensionOverviewService.getOverview({ years, months });
-        data = overview.byEmployee.map((emp) => ({
-          'Employee Code': emp.employeeCode,
-          'Employee Name': emp.name,
-          'Designation': emp.designation,
-          'Payroll Count': emp.count,
-          'Total Pension': emp.total,
-        }));
-        if (data.length === 0) {
-          data = [{ 'Message': 'No pension contributions found for the selected period' }];
-        }
-        filename = `pension-report-${timestamp}.csv`;
-        break;
+        const headers = [
+          '#',
+          'Employee Code',
+          'Employee Name',
+          'Designation',
+          'Payroll Count',
+          'Employee Pension',
+          'Employer Pension',
+          'Total Pension',
+        ];
+        const rows = overview.byEmployee.map((emp, idx) => [
+          idx + 1,
+          emp.employeeCode,
+          emp.name,
+          emp.designation,
+          emp.count,
+          emp.employeePension,
+          emp.employerPension,
+          emp.total,
+        ]);
+        const totalPension = overview.byEmployee.reduce((s, e) => s + Number(e.total ?? 0), 0);
+        const buffer = await buildBrandedExcel({
+          sheetName: 'Pension Report',
+          documentTitle: 'PENSION REPORT',
+          periodLabel,
+          summaryParts: [
+            `Total Employees: ${overview.byEmployee.length}`,
+            `Total Pension: ${fmt(totalPension)}`,
+          ],
+          headers,
+          rows,
+          numericColumns: [6, 7, 8],
+          columnWidths: [5, 14, 22, 16, 12, 16, 16, 14],
+          emptyMessage: 'No pension contributions found for the selected period.',
+          getLogoPath,
+        });
+        return {
+          buffer,
+          filename: `pension-report-${timestamp}.xlsx`,
+          contentType: EXCEL_CONTENT_TYPE,
+        };
       }
     }
-
-    const parser = new Parser();
-    const csv = data.length > 0 ? parser.parse(data) : 'No data available';
-    return { csv, filename };
   }
 
   // ─── PDF core helpers ──────────────────────────────────────────────────────
@@ -374,6 +622,18 @@ export class ReportsService {
     return (payroll.deductions ?? [])
       .filter((d) => codes.includes(d.code))
       .reduce((s, d) => s + parseAmount(d.amount), 0);
+  }
+
+  private getPayrollPensionEmployee(payroll: Payroll): number {
+    const fromField = parseAmount(payroll.pensionAmount);
+    if (fromField > 0) return fromField;
+    return this.getDeductionSum(payroll, [PENSION_DEDUCTION_CODE]);
+  }
+
+  private getPayrollPensionEmployer(payroll: Payroll): number {
+    const fromField = parseAmount(payroll.pensionEmployerAmount);
+    if (fromField > 0) return fromField;
+    return this.getDeductionSum(payroll, [PENSION_EMPLOYER_DEDUCTION_CODE]);
   }
 
   // ─── PDF generators ────────────────────────────────────────────────────────
@@ -613,15 +873,16 @@ export class ReportsService {
     }
 
     const cols = [
-      { label: '#', width: pageWidth * 0.04, align: 'center' as const },
-      { label: 'Employee', width: pageWidth * 0.22, align: 'left' as const },
-      { label: 'Designation / Stage', width: pageWidth * 0.14, align: 'left' as const },
-      { label: 'Tax Slab', width: pageWidth * 0.12, align: 'left' as const },
-      { label: 'Gross', width: pageWidth * 0.10, align: 'right' as const },
-      { label: 'Income Tax', width: pageWidth * 0.10, align: 'right' as const },
-      { label: 'GP Fund', width: pageWidth * 0.09, align: 'right' as const },
-      { label: 'Other Ded.', width: pageWidth * 0.09, align: 'right' as const },
-      { label: 'Net Salary', width: pageWidth * 0.10, align: 'right' as const },
+      { label: '#', width: pageWidth * 0.035, align: 'center' as const },
+      { label: 'Employee', width: pageWidth * 0.16, align: 'left' as const },
+      { label: 'Designation', width: pageWidth * 0.105, align: 'left' as const },
+      { label: 'Gross', width: pageWidth * 0.09, align: 'right' as const },
+      { label: 'Income Tax', width: pageWidth * 0.085, align: 'right' as const },
+      { label: 'GP Fund', width: pageWidth * 0.08, align: 'right' as const },
+      { label: 'Emp. Pension', width: pageWidth * 0.09, align: 'right' as const },
+      { label: 'Empr. Pension', width: pageWidth * 0.09, align: 'right' as const },
+      { label: 'Other Ded.', width: pageWidth * 0.085, align: 'right' as const },
+      { label: 'Net Salary', width: pageWidth * 0.09, align: 'right' as const },
     ];
     const headerH = 24;
     const rowH = 18;
@@ -631,7 +892,7 @@ export class ReportsService {
       let x = left;
       cols.forEach((col) => {
         this.drawTableCell(doc, col.label, x, y, col.width, headerH, {
-          bold: true, fontSize: 6.5, align: col.align, fill: '#d0d0d0',
+          bold: true, fontSize: 6, align: col.align, fill: '#d0d0d0',
         });
         x += col.width;
       });
@@ -640,6 +901,12 @@ export class ReportsService {
 
     let y = drawTableHeader(doc.y);
 
+    let totalGp = 0;
+    let totalEmpPension = 0;
+    let totalEmprPension = 0;
+    let totalOther = 0;
+    let totalIncomeTax = 0;
+
     payrolls.forEach((p, idx) => {
       const { y: newY, newPage } = this.checkPageBreak(doc, y, rowH, docTitle, subtitle);
       y = newPage ? drawTableHeader(newY) : newY;
@@ -647,19 +914,30 @@ export class ReportsService {
       const gpFund = this.getDeductionSum(p, [GP_FUND_DEDUCTION_CODE, GP_FUND_MONTHLY_MARKUP_CODE, GP_FUND_ANNUAL_MARKUP_CODE]);
       const advance = this.getDeductionSum(p, [GP_FUND_ADVANCE_CODE]);
       const gpTotal = gpFund + advance;
+      const pensionEmployee = this.getPayrollPensionEmployee(p);
+      const pensionEmployer = this.getPayrollPensionEmployer(p);
       const subTax = (p.deductions ?? []).filter((d) => d.category === 'sub_tax').reduce((s, d) => s + parseAmount(d.amount), 0);
-      const otherDed = parseAmount(p.totalDeductions) - parseAmount(p.incomeTax) - subTax - gpTotal;
-      const slabRate = p.appliedTaxRate != null ? ` (${Number(p.appliedTaxRate)}%)` : '';
+      const otherDed = Math.max(
+        0,
+        parseAmount(p.totalDeductions) - parseAmount(p.incomeTax) - subTax - gpTotal - pensionEmployee,
+      );
       const fill = idx % 2 === 0 ? undefined : '#fafafa';
+
+      totalGp += gpTotal;
+      totalEmpPension += pensionEmployee;
+      totalEmprPension += pensionEmployer;
+      totalOther += otherDed;
+      totalIncomeTax += parseAmount(p.incomeTax);
 
       const rowVals = [
         String(idx + 1),
         `${p.employee?.name ?? ''}\n${p.employee?.employeeCode ?? ''}`,
         `${p.employee?.designation ?? ''}\n${p.employee?.stage ?? ''}`,
-        `${p.taxSlabName ?? '—'}${slabRate}`,
         fmt(p.grossSalary),
         fmt(p.incomeTax),
         gpTotal > 0 ? fmt(gpTotal) : '—',
+        pensionEmployee > 0 ? fmt(pensionEmployee) : '—',
+        pensionEmployer > 0 ? fmt(pensionEmployer) : '—',
         otherDed > 0 ? fmt(otherDed) : '—',
         fmt(p.netSalary),
       ];
@@ -667,25 +945,36 @@ export class ReportsService {
       let x = left;
       rowVals.forEach((val, ci) => {
         this.drawTableCell(doc, val, x, y, cols[ci].width, rowH, {
-          fontSize: ci === 1 || ci === 2 ? 6 : 7, align: cols[ci].align, fill,
+          fontSize: ci === 1 || ci === 2 ? 6 : 6.5, align: cols[ci].align, fill,
         });
         x += cols[ci].width;
       });
       y += rowH;
     });
 
-    const totalVals = ['', 'TOTAL', '', '', fmt(summary.totalGross), '', '', fmt(summary.totalDeductions), fmt(summary.totalNet)];
+    const totalVals = [
+      '',
+      'TOTAL',
+      '',
+      fmt(summary.totalGross),
+      fmt(totalIncomeTax),
+      totalGp > 0 ? fmt(totalGp) : '—',
+      totalEmpPension > 0 ? fmt(totalEmpPension) : '—',
+      totalEmprPension > 0 ? fmt(totalEmprPension) : '—',
+      totalOther > 0 ? fmt(totalOther) : '—',
+      fmt(summary.totalNet),
+    ];
     let x = left;
     totalVals.forEach((val, ci) => {
       this.drawTableCell(doc, val, x, y, cols[ci].width, rowH, {
-        bold: true, fontSize: 7, align: cols[ci].align, fill: '#e8e8e8',
+        bold: true, fontSize: 6.5, align: cols[ci].align, fill: '#e8e8e8',
       });
       x += cols[ci].width;
     });
 
     doc.y = y + rowH + 6;
     doc.font('Helvetica').fontSize(7).fillColor('#555')
-      .text('* GP Fund includes base deduction, advance installment, and annual markup (June only).', left, doc.y);
+      .text('* GP Fund includes base deduction, advance installment, and annual markup (June only). Employer pension is shown separately and is not part of employee total deductions.', left, doc.y);
   }
 
   // ─── Taxes Report ─────────────────────────────────────────────────────────
@@ -1072,10 +1361,12 @@ export class ReportsService {
 
     const cols = [
       { label: '#', width: pageWidth * 0.05, align: 'center' as const },
-      { label: 'Employee', width: pageWidth * 0.28, align: 'left' as const },
-      { label: 'Designation', width: pageWidth * 0.22, align: 'left' as const },
-      { label: 'Payroll Count', width: pageWidth * 0.12, align: 'center' as const },
-      { label: 'Total Pension', width: pageWidth * 0.15, align: 'right' as const },
+      { label: 'Employee', width: pageWidth * 0.22, align: 'left' as const },
+      { label: 'Designation', width: pageWidth * 0.16, align: 'left' as const },
+      { label: 'Payrolls', width: pageWidth * 0.09, align: 'center' as const },
+      { label: 'Employee Pension', width: pageWidth * 0.16, align: 'right' as const },
+      { label: 'Employer Pension', width: pageWidth * 0.16, align: 'right' as const },
+      { label: 'Total Pension', width: pageWidth * 0.16, align: 'right' as const },
     ];
     const headerH = 22;
     const rowH = 16;
@@ -1103,6 +1394,8 @@ export class ReportsService {
         `${emp.name}\n${emp.employeeCode}`,
         emp.designation,
         String(emp.count),
+        fmt(emp.employeePension),
+        fmt(emp.employerPension),
         fmt(emp.total),
       ];
 
@@ -1117,7 +1410,15 @@ export class ReportsService {
     });
 
     // Totals row
-    const totalVals = ['', 'TOTAL', '', '', fmt(summary.totalPension)];
+    const totalVals = [
+      '',
+      'TOTAL',
+      '',
+      '',
+      fmt(summary.totalEmployeePension),
+      fmt(summary.totalEmployerPension),
+      fmt(summary.totalPension),
+    ];
     let x = left;
     totalVals.forEach((val, ci) => {
       this.drawTableCell(doc, val, x, y, cols[ci].width, rowH, {
@@ -1133,10 +1434,12 @@ export class ReportsService {
       doc.moveDown(0.3);
 
       const mCols = [
-        { label: 'Period', width: pageWidth * 0.30, align: 'left' as const },
-        { label: 'Employees', width: pageWidth * 0.20, align: 'center' as const },
-        { label: 'Records', width: pageWidth * 0.15, align: 'center' as const },
-        { label: 'Total Pension', width: pageWidth * 0.20, align: 'right' as const },
+        { label: 'Period', width: pageWidth * 0.22, align: 'left' as const },
+        { label: 'Employees', width: pageWidth * 0.12, align: 'center' as const },
+        { label: 'Records', width: pageWidth * 0.12, align: 'center' as const },
+        { label: 'Employee Pension', width: pageWidth * 0.18, align: 'right' as const },
+        { label: 'Employer Pension', width: pageWidth * 0.18, align: 'right' as const },
+        { label: 'Total Pension', width: pageWidth * 0.18, align: 'right' as const },
       ];
       const mHeaderH = 20;
       const mRowH = 15;
@@ -1163,6 +1466,8 @@ export class ReportsService {
           row.label,
           String(row.employeeCount),
           String(row.count),
+          fmt(row.employeePension),
+          fmt(row.employerPension),
           fmt(row.total),
         ];
 

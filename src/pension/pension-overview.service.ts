@@ -26,35 +26,93 @@ export class PensionOverviewService {
     let totalEmployerPension = 0;
     let payrollCount = 0;
     const employeeIds = new Set<number>();
-    const monthMap = new Map<string, { year: number; month: number; label: string; total: number; count: number; empIds: Set<number> }>();
-    const yearMap = new Map<number, { year: number; total: number; count: number; empIds: Set<number> }>();
-    const empMap = new Map<number, { employeeId: number; employeeCode: string; name: string; designation: string; total: number; count: number }>();
+    const monthMap = new Map<string, {
+      year: number;
+      month: number;
+      label: string;
+      employeePension: number;
+      employerPension: number;
+      total: number;
+      count: number;
+      empIds: Set<number>;
+    }>();
+    const yearMap = new Map<number, {
+      year: number;
+      employeePension: number;
+      employerPension: number;
+      total: number;
+      count: number;
+      empIds: Set<number>;
+    }>();
+    const empMap = new Map<number, {
+      employeeId: number;
+      employeeCode: string;
+      name: string;
+      designation: string;
+      employeePension: number;
+      employerPension: number;
+      total: number;
+      count: number;
+    }>();
 
     for (const p of payrolls) {
-      const amt = roundAmount(parseAmount(p.pensionAmount) + parseAmount(p.pensionEmployerAmount));
+      const employeeAmt = roundAmount(parseAmount(p.pensionAmount));
+      const employerAmt = roundAmount(parseAmount(p.pensionEmployerAmount));
+      const amt = roundAmount(employeeAmt + employerAmt);
       if (amt <= 0) continue;
 
       payrollCount++;
       employeeIds.add(p.employeeId);
       totalPension = roundAmount(totalPension + amt);
-      totalEmployeePension = roundAmount(totalEmployeePension + parseAmount(p.pensionAmount));
-      totalEmployerPension = roundAmount(totalEmployerPension + parseAmount(p.pensionEmployerAmount));
+      totalEmployeePension = roundAmount(totalEmployeePension + employeeAmt);
+      totalEmployerPension = roundAmount(totalEmployerPension + employerAmt);
 
       const mk = `${p.year}-${p.month}`;
-      const mEntry = monthMap.get(mk) ?? { year: p.year, month: p.month, label: `${MONTH_NAMES[p.month - 1]} ${p.year}`, total: 0, count: 0, empIds: new Set() };
+      const mEntry = monthMap.get(mk) ?? {
+        year: p.year,
+        month: p.month,
+        label: `${MONTH_NAMES[p.month - 1]} ${p.year}`,
+        employeePension: 0,
+        employerPension: 0,
+        total: 0,
+        count: 0,
+        empIds: new Set(),
+      };
+      mEntry.employeePension = roundAmount(mEntry.employeePension + employeeAmt);
+      mEntry.employerPension = roundAmount(mEntry.employerPension + employerAmt);
       mEntry.total = roundAmount(mEntry.total + amt);
       mEntry.count++;
       mEntry.empIds.add(p.employeeId);
       monthMap.set(mk, mEntry);
 
-      const yEntry = yearMap.get(p.year) ?? { year: p.year, total: 0, count: 0, empIds: new Set() };
+      const yEntry = yearMap.get(p.year) ?? {
+        year: p.year,
+        employeePension: 0,
+        employerPension: 0,
+        total: 0,
+        count: 0,
+        empIds: new Set(),
+      };
+      yEntry.employeePension = roundAmount(yEntry.employeePension + employeeAmt);
+      yEntry.employerPension = roundAmount(yEntry.employerPension + employerAmt);
       yEntry.total = roundAmount(yEntry.total + amt);
       yEntry.count++;
       yEntry.empIds.add(p.employeeId);
       yearMap.set(p.year, yEntry);
 
       if (p.employee) {
-        const eEntry = empMap.get(p.employeeId) ?? { employeeId: p.employeeId, employeeCode: p.employee.employeeCode, name: p.employee.name, designation: p.employee.designation, total: 0, count: 0 };
+        const eEntry = empMap.get(p.employeeId) ?? {
+          employeeId: p.employeeId,
+          employeeCode: p.employee.employeeCode,
+          name: p.employee.name,
+          designation: p.employee.designation,
+          employeePension: 0,
+          employerPension: 0,
+          total: 0,
+          count: 0,
+        };
+        eEntry.employeePension = roundAmount(eEntry.employeePension + employeeAmt);
+        eEntry.employerPension = roundAmount(eEntry.employerPension + employerAmt);
         eEntry.total = roundAmount(eEntry.total + amt);
         eEntry.count++;
         empMap.set(p.employeeId, eEntry);
